@@ -123,7 +123,8 @@ class CardPresenter(
 		}
 
 		fun unbind() {
-			_item.value = null
+			// Keep the last item: clearing it tears down the card's content (including its image view),
+			// and every recycled card would then build all of it again when it is bound to the next item
 			_focused.value = false
 		}
 	}

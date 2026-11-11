@@ -38,6 +38,9 @@ class BackgroundService(
 	companion object {
 		val SLIDESHOW_DURATION = 30.seconds
 		val TRANSITION_DURATION = 800.milliseconds
+
+		// Backdrops are shown on a TV screen, so there is no use for a bigger picture (they can be 4K or more)
+		const val BACKDROP_MAX_WIDTH = 1920
 	}
 
 	// Async
@@ -49,6 +52,7 @@ class BackgroundService(
 	// Current background data
 	private var _backgrounds = emptyList<ImageBitmap>()
 	private var _currentIndex = 0
+	private var requestedUrls: Set<String>? = null
 	private var _currentBackground = MutableStateFlow<ImageBitmap?>(null)
 	private var _blurBackground = MutableStateFlow(false)
 	private var _enabled = MutableStateFlow(true)
@@ -71,7 +75,7 @@ class BackgroundService(
 
 		// Get all backdrop urls
 		val backdropUrls = (baseItem.itemBackdropImages + baseItem.parentBackdropImages)
-			.map { it.getUrl(api) }
+			.map { it.getUrl(api, maxWidth = BACKDROP_MAX_WIDTH) }
 			.toSet()
 
 		loadBackgrounds(backdropUrls)
@@ -105,23 +109,44 @@ class BackgroundService(
 		// Re-enable backgrounds if disabled
 		_enabled.value = true
 
+		// Moving between items that share their backdrops (episodes of a series) needs no new decoding
+		if (backdropUrls == requestedUrls) return
+		requestedUrls = backdropUrls
+
 		// Cancel current loading job
 		loadBackgroundsJob?.cancel()
 		loadBackgroundsJob = scope.launch(Dispatchers.IO) {
-			_backgrounds = backdropUrls.mapNotNull { url ->
-				imageLoader.execute(
+			val loaded = mutableListOf<ImageBitmap>()
+			for (url in backdropUrls) {
+				val bitmap = imageLoader.execute(
 					request = ImageRequest.Builder(context).data(url).build()
-				).image?.toBitmap()?.asImageBitmap()
+				).image?.toBitmap()?.asImageBitmap() ?: continue
+				loaded.add(bitmap)
+
+				// Show the first background as soon as it is ready instead of after all of them
+				if (loaded.size == 1) {
+					_backgrounds = loaded.toList()
+					_currentIndex = 0
+					update()
+				}
 			}
 
-			// Go to first background
-			_currentIndex = 0
-			update()
+			if (loaded.isEmpty()) {
+				_backgrounds = emptyList()
+				_currentIndex = 0
+				update()
+			} else if (loaded.size > 1) {
+				// Go to first background, with the slideshow of all of them
+				_backgrounds = loaded.toList()
+				_currentIndex = 0
+				update()
+			}
 		}
 	}
 
 	fun clearBackgrounds() {
 		loadBackgroundsJob?.cancel()
+		requestedUrls = null
 
 		// Re-enable backgrounds if disabled
 		_enabled.value = true

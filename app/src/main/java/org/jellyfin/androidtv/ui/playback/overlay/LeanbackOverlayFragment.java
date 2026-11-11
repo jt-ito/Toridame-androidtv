@@ -24,6 +24,7 @@ public class LeanbackOverlayFragment extends PlaybackSupportFragment {
     private CustomPlaybackTransportControlGlue playerGlue;
     private VideoPlayerAdapter playerAdapter;
     private boolean shouldShowOverlay = true;
+    private boolean popupShowing = false;
     private Lazy<PlaybackControllerContainer> playbackControllerContainer = inject(PlaybackControllerContainer.class);
     private final Lazy<UserSettingPreferences> userSettingPreferences = inject(UserSettingPreferences.class);
     private Lazy<ImageLoader> imageLoader = inject(ImageLoader.class);
@@ -61,9 +62,17 @@ public class LeanbackOverlayFragment extends PlaybackSupportFragment {
 
     @Override
     public void showControlsOverlay(boolean runAnimation) {
-        if (shouldShowOverlay) {
+        if (shouldShowOverlay && !popupShowing) {
+            // This is called for every key press while the controls are up too, to keep them from fading
+            boolean wasVisible = isControlsOverlayVisible();
+
             super.showControlsOverlay(runAnimation);
             playerAdapter.getMasterOverlayFragment().show();
+
+            // Leanback puts the focus on the first button; the play button is the one to start from, but only when
+            // the controls come up, or the focus would jump back to it every time another button is selected
+            View root = getView();
+            if (!wasVisible && root != null && playerGlue != null) root.postDelayed(() -> playerGlue.focusPlayButton(), 150);
         }
     }
 
@@ -81,6 +90,15 @@ public class LeanbackOverlayFragment extends PlaybackSupportFragment {
     public void updatePlayState() {
         playerAdapter.updatePlayState();
         playerGlue.updatePlayState();
+    }
+
+    /**
+     * While the panel at the bottom is up, Leanback must not bring the controls back on a left or right press: that
+     * is what took the focus out of the panel.
+     */
+    public void setPopupShowing(boolean popupShowing) {
+        this.popupShowing = popupShowing;
+        setShowOrHideControlsOverlayOnUserInteraction(!popupShowing);
     }
 
     public void setShouldShowOverlay(boolean shouldShowOverlay) {

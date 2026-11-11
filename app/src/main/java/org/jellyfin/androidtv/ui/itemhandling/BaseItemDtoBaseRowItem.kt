@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.ui.itemhandling
 
+import org.jellyfin.androidtv.ui.shared.SpoilerGuard
 import android.content.Context
 import org.jellyfin.androidtv.util.apiclient.JellyfinImage
 import org.jellyfin.androidtv.util.apiclient.albumPrimaryImage
@@ -109,6 +110,12 @@ open class BaseItemDtoBaseRowItem @JvmOverloads constructor(
 	}
 
 	override fun getImage(imageType: BaseRowImageType): JellyfinImage? {
+		// The spoiler guard keeps the picture of an episode that was not watched yet from showing
+		if (SpoilerGuard.covers(baseItem)) {
+			return baseItem?.parentImages?.get(ImageType.THUMB) ?: baseItem?.seriesThumbImage
+				?: baseItem?.parentImages?.get(ImageType.PRIMARY) ?: baseItem?.seriesPrimaryImage
+		}
+
 		val primaryImage = when {
 			preferSeriesPoster && baseItem?.type == BaseItemKind.EPISODE -> baseItem.parentImages[ImageType.PRIMARY]
 				?: baseItem.seriesPrimaryImage

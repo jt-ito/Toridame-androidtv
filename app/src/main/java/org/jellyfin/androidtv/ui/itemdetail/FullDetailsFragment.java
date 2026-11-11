@@ -65,6 +65,8 @@ import org.jellyfin.androidtv.ui.playback.PlaybackLauncher;
 import org.jellyfin.androidtv.ui.presentation.CardPresenter;
 import org.jellyfin.androidtv.ui.presentation.CustomListRowPresenter;
 import org.jellyfin.androidtv.ui.presentation.InfoCardPresenter;
+import org.jellyfin.androidtv.ui.shared.HiddenContentUi;
+import org.jellyfin.androidtv.ui.shared.SpoilerGuard;
 import org.jellyfin.androidtv.ui.presentation.MutableObjectAdapter;
 import org.jellyfin.androidtv.ui.presentation.MyDetailsOverviewRowPresenter;
 import org.jellyfin.androidtv.util.CoroutineUtils;
@@ -423,7 +425,7 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
                 primaryImageUrl = imageHelper.getValue().getPrimaryImageUrl(mBaseItem, false, null, posterHeight);
             }
 
-            mDetailsOverviewRow.setSummary(item.getOverview());
+            mDetailsOverviewRow.setSummary(SpoilerGuard.overview(requireContext(), item));
             switch (item.getType()) {
                 case PERSON:
                 case MUSIC_ARTIST:
@@ -652,6 +654,8 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
     }
 
     private void addInfoRows(MutableObjectAdapter<Row> adapter) {
+        ItemExtras.load(this, mBaseItem, adapter);
+
         if (KoinJavaComponent.<UserPreferences>get(UserPreferences.class).get(UserPreferences.Companion.getDebuggingEnabled()) && mBaseItem.getMediaSources() != null) {
             for (MediaSourceInfo ms : mBaseItem.getMediaSources()) {
                 if (ms.getMediaStreams() != null && !ms.getMediaStreams().isEmpty()) {
@@ -1058,6 +1062,15 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
 
         }
 
+        if (HiddenContentUi.canHide(mBaseItem)) {
+            mDetailsOverviewRow.addAction(TextUnderButton.create(requireContext(), R.drawable.ic_visibility_off, buttonSize, 0, getString(R.string.hidden_hide), new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    HiddenContentUi.hide(FullDetailsFragment.this, mBaseItem);
+                }
+            }));
+        }
+
         //Now, create a more button to show if needed
         moreButton = TextUnderButton.create(requireContext(), R.drawable.ic_more, buttonSize, 0, getString(R.string.lbl_other_options), new View.OnClickListener() {
             @Override
@@ -1188,6 +1201,11 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
         @Override
         public void onItemClicked(final Presenter.ViewHolder itemViewHolder, Object item,
                                   RowPresenter.ViewHolder rowViewHolder, Row row) {
+
+            if (item instanceof ExtraInfoCard) {
+                ItemExtras.showFullText(requireContext(), (ExtraInfoCard) item);
+                return;
+            }
 
             if (!(item instanceof BaseRowItem)) return;
             itemLauncher.getValue().launch((BaseRowItem) item, (ItemRowAdapter) ((ListRow) row).getAdapter(), requireContext());

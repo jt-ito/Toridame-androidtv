@@ -51,7 +51,11 @@ import org.jellyfin.androidtv.ui.ObservableHorizontalScrollView;
 import org.jellyfin.androidtv.ui.ObservableScrollView;
 import org.jellyfin.androidtv.ui.ProgramGridCell;
 import org.jellyfin.androidtv.ui.ScrollViewListener;
+import org.jellyfin.androidtv.ui.GridButton;
+import org.jellyfin.androidtv.ui.itemhandling.BaseItemDtoBaseRowItem;
 import org.jellyfin.androidtv.ui.itemhandling.ChapterItemInfoBaseRowItem;
+import org.jellyfin.androidtv.ui.itemhandling.EpisodePanelRowItem;
+import org.jellyfin.androidtv.ui.itemhandling.GridButtonBaseRowItem;
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter;
 import org.jellyfin.androidtv.ui.livetv.LiveTvGuide;
 import org.jellyfin.androidtv.ui.livetv.LiveTvGuideFragment;
@@ -60,6 +64,8 @@ import org.jellyfin.androidtv.ui.livetv.TvManager;
 import org.jellyfin.androidtv.ui.navigation.Destinations;
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository;
 import org.jellyfin.androidtv.ui.playback.overlay.LeanbackOverlayFragment;
+import org.jellyfin.androidtv.ui.playback.overlay.PauseScreen;
+import org.jellyfin.androidtv.ui.shared.MaintenanceReminder;
 import org.jellyfin.androidtv.ui.presentation.CardPresenter;
 import org.jellyfin.androidtv.ui.presentation.ChannelCardPresenter;
 import org.jellyfin.androidtv.ui.presentation.MutableObjectAdapter;
@@ -86,11 +92,19 @@ import kotlin.Lazy;
 import timber.log.Timber;
 
 public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGuide, View.OnKeyListener {
+    private static final long HOLD_SPEED_MS = 500;
+    private static final float HOLD_SPEED = 2f;
+
     protected VlcPlayerInterfaceBinding binding;
     private OverlayTvGuideBinding tvGuideBinding;
 
     private RowsSupportFragment mPopupRowsFragment;
     private ListRow mChapterRow;
+    private PauseScreen pauseScreen;
+    private boolean mHoldSpeedActive = false;
+    private float mHoldPreviousSpeed = 1f;
+    private List<BaseItemDto> mEpisodePanelItems;
+    private Runnable mEpisodePanelSeasons;
     private ArrayObjectAdapter mPopupRowAdapter;
     private PositionableListRowPresenter mPopupRowPresenter;
 
@@ -223,6 +237,8 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         if (playbackController != null) {
             playbackController.init(new VideoManager(requireActivity(), view, helper), this);
         }
+
+        pauseScreen = new PauseScreen((ViewGroup) binding.getRoot(), () -> playbackControllerContainer.getValue().getPlaybackController());
     }
 
     @Override
@@ -248,6 +264,13 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         slideUp = AnimationUtils.loadAnimation(requireContext(), R.anim.slide_bottom_in);
         slideDown.setAnimationListener(showAnimationListener);
         setupPopupAnimations();
+
+        // The panel at the bottom (episodes, chapters) keeps the focus on its cards: left and right at its ends must
+        // not move on to the buttons of the player behind it. Up, down and back leave it.
+        binding.popupArea.setOnFocusSearchListener((focused, direction) ->
+                binding.popupArea.getVisibility() == View.VISIBLE && (direction == View.FOCUS_LEFT || direction == View.FOCUS_RIGHT)
+                        ? focused
+                        : null);
 
         //live guide
         tvGuideBinding.channelsStatus.setTextColor(Color.GRAY);
@@ -374,10 +397,19 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         @Override
         public void onItemClicked(Presenter.ViewHolder itemViewHolder, Object item,
                                   RowPresenter.ViewHolder rowViewHolder, Row row) {
-            if (item instanceof ChapterItemInfoBaseRowItem) {
+            if (mEpisodePanelItems != null && item instanceof GridButtonBaseRowItem) {
+                Runnable seasons = mEpisodePanelSeasons;
+                hidePopupPanel();
+                if (seasons != null) seasons.run();
+            } else if (mEpisodePanelItems != null && item instanceof BaseItemDtoBaseRowItem) {
+                BaseItemDto picked = ((BaseItemDtoBaseRowItem) item).getBaseItem();
+                List<BaseItemDto> episodes = mEpisodePanelItems;
+                hidePopupPanel();
+                playEpisodeFromPanel(episodes, picked);
+            } else if (item instanceof ChapterItemInfoBaseRowItem) {
                 ChapterItemInfoBaseRowItem rowItem = (ChapterItemInfoBaseRowItem) item;
                 Long start = rowItem.getChapterInfo().getStartPositionTicks() / 10000;
-                playbackControllerContainer.getValue().getPlaybackController().seek(start);
+                playbackControllerContainer.getValue().getPlaybackController().jumpTo(start);
                 hidePopupPanel();
             } else if (item instanceof BaseItemDto) {
                 hidePopupPanel();
@@ -419,8 +451,24 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
                 event.startTracking();
                 return true;
             }
+
+            if (keepFocusInPopupPanel(keyCode)) return true;
+
+            // Up or down leaves the panel in one press, and brings the controls back
+            if (mPopupPanelVisible && !mGuideVisible && (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)) {
+                hidePopupPanel();
+                if (playbackControllerContainer.getValue().getPlaybackController().isLiveTv()) {
+                    hide();
+                } else {
+                    leanbackOverlayFragment.setShouldShowOverlay(true);
+                    leanbackOverlayFragment.showControlsOverlay(true);
+                }
+                return true;
+            }
         } else if (event.getAction() == KeyEvent.ACTION_UP) {
             if (keyListener.onKey(v, keyCode, event)) return true;
+
+            if (PlaybackShortcuts.handle(keyCode, playbackControllerContainer.getValue().getPlaybackController())) return true;
 
             if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
                 if ((event.getFlags() & KeyEvent.FLAG_CANCELED_LONG_PRESS) == 0) {
@@ -471,9 +519,47 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         }
     }
 
+    private static boolean isInside(View container, View view) {
+        for (View current = view; current != null; ) {
+            if (current == container) return true;
+            current = current.getParent() instanceof View ? (View) current.getParent() : null;
+        }
+        return false;
+    }
+
+    /**
+     * While the panel at the bottom (episodes, chapters) is up, left and right move through its cards and nothing
+     * else: not on to the buttons of the player behind it, and not out of the panel at its ends. Up, down and back
+     * are what leave it. This does the moving itself, and consumes the key so that the system does not also move the
+     * focus somewhere else.
+     */
+    private boolean keepFocusInPopupPanel(int keyCode) {
+        if (mGuideVisible || binding.popupArea.getVisibility() != View.VISIBLE) return false;
+        if (keyCode != KeyEvent.KEYCODE_DPAD_LEFT && keyCode != KeyEvent.KEYCODE_DPAD_RIGHT) return false;
+
+        int direction = keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? View.FOCUS_LEFT : View.FOCUS_RIGHT;
+        View focused = binding.getRoot().findFocus();
+
+        if (focused != null && isInside(binding.popupArea, focused)) {
+            View next = focused.focusSearch(direction);
+            if (next != null && next != focused && isInside(binding.popupArea, next)) next.requestFocus(direction);
+        } else {
+            // The focus got out some other way: bring it back
+            mPopupRowsFragment.requireView().requestFocus();
+        }
+
+        return true;
+    }
+
     private View.OnKeyListener keyListener = new View.OnKeyListener() {
         @Override
         public boolean onKey(View v, int keyCode, KeyEvent event) {
+            if (mHoldSpeedActive && (event.getAction() == KeyEvent.ACTION_UP || keyCode != KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                // Letting go of the button, or pressing another one, ends the double speed
+                endHoldSpeed();
+                if (event.getAction() == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) return true;
+            }
+
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (!mGuideVisible)
                     leanbackOverlayFragment.setShouldShowOverlay(true);
@@ -589,6 +675,11 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
                     if (!mIsVisible) {
                         if (!playbackControllerContainer.getValue().getPlaybackController().isLiveTv()) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                                // Holding it plays at double speed until it is let go
+                                if (!mHoldSpeedActive && event.getRepeatCount() > 0
+                                        && event.getEventTime() - event.getDownTime() >= HOLD_SPEED_MS) {
+                                    startHoldSpeed();
+                                }
                                 setFadingEnabled(true);
                                 return true;
                             }
@@ -622,6 +713,35 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
             return false;
         }
     };
+
+    private final Runnable hideSkipIndicator = () -> {
+        if (binding != null) binding.skipIndicator.setVisibility(View.GONE);
+    };
+
+    /**
+     * Shows how far the presses of the skip buttons have moved the video, as long as they keep coming.
+     */
+    public void showSkipIndicator(long totalMs, int hideAfterMs) {
+        if (binding == null) return;
+
+        long seconds = Math.abs(totalMs) / 1000;
+        String sign = totalMs >= 0 ? "\u00BB +" : "\u00AB \u2212";
+        binding.skipIndicator.setText(sign + seconds + "s");
+        binding.skipIndicator.setVisibility(View.VISIBLE);
+        mHandler.removeCallbacks(hideSkipIndicator);
+        mHandler.postDelayed(hideSkipIndicator, hideAfterMs);
+    }
+
+    /** Says which chapter a jump goes to, in the same place as the skip indicator. */
+    public void showChapterIndicator(String name, int hideAfterMs) {
+        if (binding == null) return;
+
+        String text = name == null || name.isEmpty() ? getString(R.string.next_chapter) : name;
+        binding.skipIndicator.setText("\u00BB " + text);
+        binding.skipIndicator.setVisibility(View.VISIBLE);
+        mHandler.removeCallbacks(hideSkipIndicator);
+        mHandler.postDelayed(hideSkipIndicator, hideAfterMs);
+    }
 
     public LocalDateTime getCurrentLocalStartDate() {
         return mCurrentGuideStart;
@@ -676,6 +796,12 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         );
 
+        if (pauseScreen != null) pauseScreen.start();
+
+        // Maintenance coming up or going on is mentioned once when something starts playing
+        String maintenanceReminder = MaintenanceReminder.text(requireContext());
+        if (maintenanceReminder != null) android.widget.Toast.makeText(requireContext(), maintenanceReminder, android.widget.Toast.LENGTH_LONG).show();
+
         if (mAudioManager.requestAudioFocus(mAudioFocusChanged, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             Timber.e("Unable to get audio focus");
             Utils.showToast(requireContext(), R.string.msg_cannot_play_time);
@@ -686,6 +812,8 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
     @Override
     public void onPause() {
         super.onPause();
+        if (pauseScreen != null) pauseScreen.stop();
+        endHoldSpeed();
         if (mItemsToPlay == null || mItemsToPlay.isEmpty()) return;
 
         setPlayPauseActionState(0);
@@ -732,11 +860,20 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
 
     private void showChapterPanel() {
         setFadingEnabled(false);
+        leanbackOverlayFragment.setPopupShowing(true);
         binding.popupArea.startAnimation(showPopup);
         binding.skipOverlay.setSkipUiEnabled(!mIsVisible && !mGuideVisible && !mPopupPanelVisible);
     }
 
     private void hidePopupPanel() {
+        if (mEpisodePanelItems != null) {
+            // The panel was showing episodes, give it its chapters back
+            mEpisodePanelItems = null;
+            mEpisodePanelSeasons = null;
+            prepareChapterAdapter();
+        }
+
+        leanbackOverlayFragment.setPopupShowing(false);
         startFadeTimer();
         binding.popupArea.startAnimation(hidePopup);
         mPopupPanelVisible = false;
@@ -1154,6 +1291,71 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
             }
             mPopupPanelVisible = true;
         }, 500);
+    }
+
+    /**
+     * Shows the episodes of a season as cards with their pictures. The first card leads to the other seasons.
+     */
+    public void showEpisodePanel(String title, List<BaseItemDto> episodes, int currentIndex, String otherLabel, Runnable onOtherSeasons) {
+        ArrayObjectAdapter episodeAdapter = new ArrayObjectAdapter(new CardPresenter(true, 110));
+        episodeAdapter.add(new GridButtonBaseRowItem(new GridButton(0, otherLabel, R.drawable.ic_folder)));
+        for (BaseItemDto episode : episodes) {
+            episodeAdapter.add(new EpisodePanelRowItem(episode));
+        }
+
+        if (mChapterRow != null) mPopupRowAdapter.remove(mChapterRow);
+        mChapterRow = new ListRow(new HeaderItem(title), episodeAdapter);
+        mPopupRowAdapter.add(mChapterRow);
+        mEpisodePanelItems = episodes;
+        mEpisodePanelSeasons = onOtherSeasons;
+
+        showChapterPanel();
+        mHandler.postDelayed(() -> {
+            if (!getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) return;
+
+            // The first card is the seasons button
+            if (currentIndex >= 0) mPopupRowPresenter.setPosition(currentIndex + 1);
+            mPopupPanelVisible = true;
+        }, 500);
+    }
+
+    private void playEpisodeFromPanel(List<BaseItemDto> episodes, BaseItemDto picked) {
+        PlaybackController controller = playbackControllerContainer.getValue().getPlaybackController();
+        BaseItemDto playing = controller.getCurrentlyPlayingItem();
+        if (picked == null || (playing != null && playing.getId().equals(picked.getId()))) return;
+
+        int index = -1;
+        for (int i = 0; i < episodes.size(); i++) {
+            if (episodes.get(i).getId().equals(picked.getId())) index = i;
+        }
+
+        // Continue where it was left, like opening it from the library does
+        long resumeMs = picked.getUserData() != null && picked.getUserData().getPlaybackPositionTicks() > 0
+                ? picked.getUserData().getPlaybackPositionTicks() / 10000
+                : 0;
+        controller.playItems(episodes, index, resumeMs);
+    }
+
+    private void startHoldSpeed() {
+        PlaybackController controller = playbackControllerContainer.getValue().getPlaybackController();
+        if (controller == null || controller.isLiveTv()) return;
+
+        mHoldPreviousSpeed = controller.getPlaybackSpeed();
+        controller.setPlaybackSpeed(HOLD_SPEED);
+        mHoldSpeedActive = true;
+
+        mHandler.removeCallbacks(hideSkipIndicator);
+        binding.skipIndicator.setText(getString(R.string.hold_speed_indicator, (int) HOLD_SPEED));
+        binding.skipIndicator.setVisibility(View.VISIBLE);
+    }
+
+    private void endHoldSpeed() {
+        if (!mHoldSpeedActive) return;
+        mHoldSpeedActive = false;
+
+        PlaybackController controller = playbackControllerContainer.getValue().getPlaybackController();
+        if (controller != null) controller.setPlaybackSpeed(mHoldPreviousSpeed);
+        if (binding != null) binding.skipIndicator.setVisibility(View.GONE);
     }
 
     private int getCurrentChapterIndex(BaseItemDto item, long pos) {

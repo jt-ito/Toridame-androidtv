@@ -15,6 +15,7 @@ import org.jellyfin.androidtv.preference.constant.HdrOverrideMode
 import org.jellyfin.androidtv.preference.constant.NextUpBehavior
 import org.jellyfin.androidtv.preference.constant.RefreshRateSwitchingBehavior
 import org.jellyfin.androidtv.preference.constant.StillWatchingBehavior
+import org.jellyfin.androidtv.preference.constant.WatchProgressChip
 import org.jellyfin.androidtv.preference.constant.WatchedIndicatorBehavior
 import org.jellyfin.androidtv.preference.constant.ZoomMode
 import org.jellyfin.androidtv.ui.playback.segment.MediaSegmentAction
@@ -205,6 +206,53 @@ class UserPreferences(context: Context) : SharedPreferenceStore(
 		 * Set when watched indicators should show on MyImageCardViews
 		 */
 		var watchedIndicatorBehavior = enumPreference("pref_watched_indicator_behavior", WatchedIndicatorBehavior.ALWAYS)
+
+		/**
+		 * What the small chip on a started item shows (percentage, time watched or time left)
+		 */
+		var watchProgressChip = enumPreference("pref_watch_progress_chip", WatchProgressChip.PERCENT)
+
+		/**
+		 * Colour the age rating by how strict it is
+		 */
+		var coloredRatings = booleanPreference("pref_colored_ratings", true)
+
+		/**
+		 * Offer to hide a title from lists on its page
+		 */
+		var hiddenContentButton = booleanPreference("pref_hidden_content_button", true)
+
+		/**
+		 * Seek to the nearest keyframe instead of the exact frame: jumps and skips are much quicker on a weak device
+		 */
+		var fastSeeking = booleanPreference("pref_fast_seeking", true)
+
+		/**
+		 * Ask the server for images as WebP at a slightly lower quality: much less to download and decode
+		 */
+		var lighterImages = booleanPreference("pref_lighter_images", true)
+
+		/**
+		 * Small tags on the cards: picture size, age rating and score
+		 */
+		var badgesEnabled = booleanPreference("pref_badges_enabled", true)
+
+		/**
+		 * Show what the focused title is (logo, year, rating, synopsis) above the rows of the home page
+		 */
+		var homeHeader = booleanPreference("pref_home_header", true)
+		var badgesQuality = booleanPreference("pref_badges_quality", true)
+		var badgesAgeRating = booleanPreference("pref_badges_age_rating", false)
+		var badgesScore = booleanPreference("pref_badges_score", false)
+
+		/**
+		 * Remote buttons for the extra player actions (key codes), changeable in the playback settings
+		 */
+		var shortcutBookmark = intPreference("pref_shortcut_bookmark", 183) // KEYCODE_PROG_RED
+		var shortcutSubtitles = intPreference("pref_shortcut_subtitles", 184) // KEYCODE_PROG_GREEN
+		var shortcutAudio = intPreference("pref_shortcut_audio", 185) // KEYCODE_PROG_YELLOW
+		var shortcutAspect = intPreference("pref_shortcut_aspect", 186) // KEYCODE_PROG_BLUE
+		var shortcutSpeedReset = intPreference("pref_shortcut_speed_reset", 7) // KEYCODE_0
 
 		/**
 		 * Enable series thumbnails in home screen rows

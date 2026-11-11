@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
+import org.jellyfin.androidtv.ui.shared.sidemenu.ProvideContentFocus
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,8 +32,6 @@ import androidx.leanback.app.RowsSupportFragment
 import androidx.lifecycle.Lifecycle
 import org.jellyfin.androidtv.ui.search.composable.SearchTextInput
 import org.jellyfin.androidtv.ui.search.composable.SearchVoiceInput
-import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbar
-import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbarActiveButton
 import org.jellyfin.androidtv.util.speech.rememberSpeechRecognizerAvailability
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -52,6 +51,7 @@ class SearchFragment : Fragment() {
 		val searchFragmentDelegate = koinInject<SearchFragmentDelegate> { parametersOf(requireContext()) }
 		var query by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
 		val textInputFocusRequester = remember { FocusRequester() }
+		ProvideContentFocus(textInputFocusRequester)
 		val resultFocusRequester = remember { FocusRequester() }
 		val speechRecognizerAvailability = rememberSpeechRecognizerAvailability()
 
@@ -70,9 +70,8 @@ class SearchFragment : Fragment() {
 			}
 		}
 
-		Column {
-			MainToolbar(MainToolbarActiveButton.Search)
-
+		// The buttons that used to be along the top are in the side menu now
+		Column(modifier = Modifier.padding(top = 27.dp)) {
 			Row(
 				horizontalArrangement = Arrangement.spacedBy(12.dp),
 				verticalAlignment = Alignment.CenterVertically,

@@ -5,6 +5,8 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
@@ -90,6 +92,44 @@ fun ItemRowAdapter.retrieveResumeItems(api: ApiClient, query: GetResumeItemsRequ
 			)
 
 			if (response.items.isEmpty()) removeRow()
+		}.fold(
+			onSuccess = { notifyRetrieveFinished() },
+			onFailure = { error -> notifyRetrieveFinished(error as? Exception) }
+		)
+	}
+}
+
+/**
+ * What is being watched, then what is up next. A series that is being watched keeps its place among the first and
+ * is not listed again as up next.
+ */
+fun ItemRowAdapter.retrieveResumeNextUp(api: ApiClient, resumeQuery: GetResumeItemsRequest, nextUpQuery: GetNextUpRequest) {
+	ProcessLifecycleOwner.get().lifecycleScope.launch {
+		runCatching {
+			val (resume, nextUp) = withContext(Dispatchers.IO) {
+				coroutineScope {
+					val resumeItems = async { api.itemsApi.getResumeItems(resumeQuery).content.items }
+					val nextUpItems = async { runCatching { api.tvShowsApi.getNextUp(nextUpQuery).content.items }.getOrDefault(emptyList()) }
+					resumeItems.await() to nextUpItems.await()
+				}
+			}
+
+			val resumeIds = resume.map { it.id }.toSet()
+			val resumeSeries = resume.mapNotNull { it.seriesId }.toSet()
+			val combined = resume + nextUp.filter { it.id !in resumeIds && it.seriesId !in resumeSeries }
+
+			setItems(
+				items = combined,
+				transform = { item, _ ->
+					BaseItemDtoBaseRowItem(
+						item,
+						preferParentThumb,
+						isStaticHeight
+					)
+				}
+			)
+
+			if (combined.isEmpty()) removeRow()
 		}.fold(
 			onSuccess = { notifyRetrieveFinished() },
 			onFailure = { error -> notifyRetrieveFinished(error as? Exception) }

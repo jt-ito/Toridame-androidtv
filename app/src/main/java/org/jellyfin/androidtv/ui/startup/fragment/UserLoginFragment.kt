@@ -4,24 +4,31 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.view.isVisible
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.FragmentTransaction
-import androidx.fragment.app.commit
-import androidx.fragment.app.replace
+import androidx.fragment.compose.content
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.model.ApiClientErrorLoginState
+import org.jellyfin.androidtv.auth.model.AuthenticatedState
+import org.jellyfin.androidtv.auth.model.AuthenticatingState
+import org.jellyfin.androidtv.auth.model.PendingQuickConnectState
+import org.jellyfin.androidtv.auth.model.RequireSignInState
+import org.jellyfin.androidtv.auth.model.ServerUnavailableState
+import org.jellyfin.androidtv.auth.model.ServerVersionNotSupported
 import org.jellyfin.androidtv.auth.model.UnavailableQuickConnectState
-import org.jellyfin.androidtv.data.service.BackgroundService
-import org.jellyfin.androidtv.databinding.FragmentUserLoginBinding
+import org.jellyfin.androidtv.auth.repository.ServerRepository
+import org.jellyfin.androidtv.ui.startup.LoginMethod
+import org.jellyfin.androidtv.ui.startup.UserLoginScreen
 import org.jellyfin.androidtv.ui.startup.UserLoginViewModel
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
-import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
 
 class UserLoginFragment : Fragment() {
@@ -33,9 +40,6 @@ class UserLoginFragment : Fragment() {
 	}
 
 	private val userLoginViewModel: UserLoginViewModel by activityViewModel()
-	private val backgroundService: BackgroundService by inject()
-	private var _binding: FragmentUserLoginBinding? = null
-	private val binding get() = _binding!!
 
 	private val usernameArgument get() = arguments?.getString(ARG_USERNAME)?.ifBlank { null }
 	private val serverIdArgument get() = arguments?.getString(ARG_SERVER_ID)?.ifBlank { null }
@@ -52,62 +56,79 @@ class UserLoginFragment : Fragment() {
 		inflater: LayoutInflater,
 		container: ViewGroup?,
 		savedInstanceState: Bundle?
-	): View {
-		_binding = FragmentUserLoginBinding.inflate(inflater, container, false)
+	): View = content {
+		val server by userLoginViewModel.server.collectAsState()
+		val quickConnectState by userLoginViewModel.quickConnectState.collectAsState()
+		val loginState by userLoginViewModel.loginState.collectAsState()
+		val lifecycle = LocalLifecycleOwner.current.lifecycle
 
-		binding.cancel.setOnClickListener { parentFragmentManager.popBackStack() }
-		binding.useCredentials.setOnClickListener { setLoginMethod<UserLoginCredentialsFragment>() }
-		binding.useQuickconnect.setOnClickListener { setLoginMethod<UserLoginQuickConnectFragment>() }
+		var method by remember { mutableStateOf(if (skipQuickConnect) LoginMethod.Credentials else LoginMethod.QuickConnect) }
+		var username by remember { mutableStateOf(userLoginViewModel.forcedUsername.orEmpty()) }
+		var password by remember { mutableStateOf("") }
+		var emptyUsername by remember { mutableStateOf(false) }
 
-		return binding.root
-	}
+		LaunchedEffect(Unit) { userLoginViewModel.clearLoginState() }
 
-	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-		super.onViewCreated(view, savedInstanceState)
-
-		userLoginViewModel.clearLoginState()
-
-		// Open initial fragment
-		if (skipQuickConnect) setLoginMethod<UserLoginCredentialsFragment>()
-		else setLoginMethod<UserLoginQuickConnectFragment>()
-
-		lifecycleScope.launch {
-			viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-				// Update "connecting to ..." text and background
-				userLoginViewModel.server.onEach { server ->
-					val name = server?.name ?: "Jellyfin"
-					binding.subtitle.text = getString(R.string.login_connect_to, name)
-
-					if (server != null) backgroundService.setBackground(server)
-					else backgroundService.clearBackgrounds()
-				}.launchIn(this)
-
-				// Disable QuickConnect when unavailable
-				userLoginViewModel.quickConnectState.onEach { state ->
-					binding.useQuickconnect.isEnabled = state != UnavailableQuickConnectState
-					if (state == UnavailableQuickConnectState) setLoginMethod<UserLoginCredentialsFragment>()
-				}.launchIn(this)
+		// A Quick Connect code is asked for while that is how to sign in, and the screen is showing
+		LaunchedEffect(method) {
+			if (method == LoginMethod.QuickConnect) {
+				lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { userLoginViewModel.initiateQuickconnect() }
 			}
 		}
-	}
 
-	override fun onDestroyView() {
-		super.onDestroyView()
-
-		_binding = null
-	}
-
-	private inline fun <reified T : Fragment> setLoginMethod() {
-		val currentFragment = childFragmentManager.findFragmentByTag(TAG_LOGIN_METHOD)
-		if (currentFragment is T) return
-
-		childFragmentManager.commit {
-			setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE)
-			replace<T>(binding.loginMethod.id, TAG_LOGIN_METHOD)
+		// Quick Connect that is not available leaves the password
+		LaunchedEffect(quickConnectState) {
+			if (quickConnectState == UnavailableQuickConnectState) method = LoginMethod.Credentials
 		}
 
-		// Hide button for active fragment
-		binding.useCredentials.isVisible = T::class != UserLoginCredentialsFragment::class
-		binding.useQuickconnect.isVisible = T::class != UserLoginQuickConnectFragment::class
+		val message = when (val state = loginState) {
+			is ServerVersionNotSupported -> getString(
+				R.string.server_issue_outdated_version,
+				state.server.version,
+				ServerRepository.recommendedServerVersion.toString()
+			)
+			AuthenticatingState -> getString(R.string.login_authenticating)
+			RequireSignInState -> getString(R.string.login_invalid_credentials)
+			ServerUnavailableState,
+			is ApiClientErrorLoginState -> getString(R.string.login_server_unavailable)
+			// Nothing to say, because the activity will respond to the new session
+			AuthenticatedState,
+			null -> if (emptyUsername) getString(R.string.login_username_field_empty) else null
+		}
+
+		UserLoginScreen(
+			serverName = server?.name ?: "Jellyfin",
+			method = method,
+			quickConnectCode = (quickConnectState as? PendingQuickConnectState)?.code?.formatCode(),
+			quickConnectAvailable = quickConnectState != UnavailableQuickConnectState,
+			username = username,
+			onUsernameChange = { username = it },
+			usernameLocked = userLoginViewModel.forcedUsername != null,
+			password = password,
+			onPasswordChange = { password = it },
+			message = message,
+			onSignIn = {
+				if (username.isNotBlank()) {
+					emptyUsername = false
+					userLoginViewModel.login(username, password)
+				} else {
+					emptyUsername = true
+				}
+			},
+			onMethodChange = { method = it },
+			onCancel = { parentFragmentManager.popBackStack() },
+		)
+	}
+
+	/**
+	 * Add space after every 3 characters so "420420" becomes "420 420".
+	 */
+	private fun String.formatCode() = buildString {
+		@Suppress("MagicNumber")
+		val interval = 3
+		this@formatCode.forEachIndexed { index, character ->
+			if (index != 0 && index % interval == 0) append(" ")
+			append(character)
+		}
 	}
 }

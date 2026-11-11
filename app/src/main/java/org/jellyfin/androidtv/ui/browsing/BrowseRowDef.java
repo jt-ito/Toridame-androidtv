@@ -147,6 +147,16 @@ public class BrowseRowDef {
         this.changeTriggers = changeTriggers;
     }
 
+    public BrowseRowDef(String header, GetResumeItemsRequest resume, GetNextUpRequest nextUp, boolean preferParentThumb, boolean staticHeight, ChangeTriggerType[] changeTriggers) {
+        headerText = header;
+        this.resumeQuery = resume;
+        this.nextUpQuery = nextUp;
+        this.queryType = QueryType.ResumeNextUp;
+        this.staticHeight = staticHeight;
+        this.preferParentThumb = preferParentThumb;
+        this.changeTriggers = changeTriggers;
+    }
+
     public BrowseRowDef(String header, GetSpecialsRequest query) {
         headerText = header;
         this.specialsQuery = query;

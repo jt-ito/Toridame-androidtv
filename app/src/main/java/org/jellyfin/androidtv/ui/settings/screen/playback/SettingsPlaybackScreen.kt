@@ -122,6 +122,26 @@ fun SettingsPlaybackScreen() {
 		}
 
 		item {
+			var fastSeeking by rememberPreference(userPreferences, UserPreferences.fastSeeking)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_fast_seeking)) },
+				captionContent = { Text(stringResource(R.string.pref_fast_seeking_description)) },
+				trailingContent = { org.jellyfin.androidtv.ui.base.form.Checkbox(checked = fastSeeking) },
+				onClick = { fastSeeking = !fastSeeking },
+			)
+		}
+
+		item {
+			ListButton(
+				leadingContent = { Icon(painterResource(R.drawable.ic_more), contentDescription = null) },
+				headingContent = { Text(stringResource(R.string.pref_shortcuts)) },
+				onClick = { router.push(Routes.PLAYBACK_SHORTCUTS) },
+				modifier = Modifier.focusKey(Routes.PLAYBACK_SHORTCUTS)
+			)
+		}
+
+		item {
 			ListButton(
 				leadingContent = { Icon(painterResource(R.drawable.ic_more), contentDescription = null) },
 				headingContent = { Text(stringResource(R.string.pref_playback_advanced)) },

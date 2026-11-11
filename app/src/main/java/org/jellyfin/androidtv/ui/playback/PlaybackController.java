@@ -202,6 +202,12 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             if (mediaSources == null || mediaSources.isEmpty()) {
                 return null;
             } else {
+                // A version the viewer picked while watching comes first
+                if (forcedMediaSourceItem != null && forcedMediaSourceItem.equals(item.getId())) {
+                    for (MediaSourceInfo mediaSource : mediaSources) {
+                        if (forcedMediaSourceId.equals(mediaSource.getId())) return mediaSource;
+                    }
+                }
                 // Prefer the media source with the same id as the item
                 for (MediaSourceInfo mediaSource : mediaSources) {
                     if (item.getId().equals(UUIDSerializerKt.toUUIDOrNull(mediaSource.getId()))) {
@@ -212,6 +218,30 @@ public class PlaybackController implements PlaybackControllerNotifiable {
                 return mediaSources.get(0);
             }
         }
+    }
+
+    private java.util.UUID forcedMediaSourceItem;
+    private String forcedMediaSourceId;
+
+    /** The items waiting to be played, in order, including the one playing. */
+    public List<BaseItemDto> getQueue() {
+        return mItems;
+    }
+
+    /**
+     * Plays the same item again in another version (media source) from where it is now.
+     */
+    public void playVersion(String mediaSourceId) {
+        BaseItemDto item = getCurrentlyPlayingItem();
+        if (item == null) return;
+
+        refreshCurrentPosition();
+        long position = mCurrentPosition;
+        forcedMediaSourceItem = item.getId();
+        forcedMediaSourceId = mediaSourceId;
+        stop();
+        resetPlayerErrors();
+        play(position);
     }
 
     public StreamInfo getCurrentStreamInfo() {
@@ -542,7 +572,7 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         if (!isLiveTv && currentMediaSource != null) {
             internalOptions.setMediaSourceId(currentMediaSource.getId());
         }
-        DeviceProfile internalProfile = DeviceProfileKt.createDeviceProfile(
+        DeviceProfile internalProfile = org.jellyfin.androidtv.util.profile.DeviceProfileCache.get(
                 mFragment.getContext(),
                 userPreferences.getValue(),
                 get(ServerVersion.class)
@@ -939,6 +969,23 @@ public class PlaybackController implements PlaybackControllerNotifiable {
         }
     }
 
+    /**
+     * Plays another item in the player that is already open, with the given items as the queue. Opening a new player
+     * for it would close this one and take the user back to where they came from.
+     */
+    public void playItems(List<BaseItemDto> items, int startIndex, long position) {
+        if (items == null || startIndex < 0 || startIndex >= items.size()) return;
+
+        stop();
+        resetPlayerErrors();
+        mItems = items;
+        mCurrentIndex = startIndex;
+        videoQueueManager.getValue().setCurrentVideoQueue(items);
+        videoQueueManager.getValue().setCurrentMediaPosition(startIndex);
+        spinnerOff = false;
+        play(position);
+    }
+
     public void prev() {
         Timber.d("Prev called.");
         if (mCurrentIndex > 0 && mItems.size() > 0) {
@@ -976,12 +1023,10 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             return;
         }
 
-        if (wasSeeking) {
+        // While paused nothing finishes a seek (that happens when playing), and the player copes with seeks on top of
+        // each other, so a paused seek never waits
+        if (wasSeeking && !isPaused()) {
             Timber.d("Previous seek has not finished - cancelling seek from %s to %d", mCurrentPosition, pos);
-            if (isPaused()) {
-                refreshCurrentPosition();
-                play(mCurrentPosition);
-            }
             return;
         }
         wasSeeking = true;
@@ -1043,11 +1088,16 @@ public class PlaybackController implements PlaybackControllerNotifiable {
             // if seek succeeds call play and mirror the logic in play() for unpausing. if fails call pause()
             // stopProgressLoop() being called at the beginning of startProgressLoop keeps this from breaking. otherwise it would start twice
             // if seek() is called from skip()
+            boolean stayPaused = isPaused();
             mPlaybackState = PlaybackState.SEEKING;
             if (mVideoManager.seekTo(pos) < 0) {
                 if (mFragment != null)
                     Utils.showToast(mFragment.getContext(), mFragment.getString(R.string.seek_error));
                 pause();
+            } else if (stayPaused) {
+                // A seek while paused stays paused, on the new frame, and the position shown is the one that was seeked to
+                mPlaybackState = PlaybackState.PAUSED;
+                if (mFragment != null) mFragment.setPlayPauseActionState(0);
             } else {
                 mVideoManager.play();
                 mPlaybackState = PlaybackState.PLAYING;
@@ -1058,24 +1108,99 @@ public class PlaybackController implements PlaybackControllerNotifiable {
     }
 
     private long currentSkipPos = 0;
+    private int skipRetries = 0;
+    // Quick presses add up into one seek; this is how long to wait for another press before seeking
+    private static final int SKIP_COALESCE_MS = 400;
+    // A seek that has not finished makes the player ignore a new one, so a waiting skip tries again shortly
+    private static final int SKIP_RETRY_MS = 150;
+    private static final int SKIP_MAX_RETRIES = 40;
+    // The indicator adds up the presses that follow each other closely
+    private static final int SKIP_INDICATOR_MS = 1000;
+    private long skipIndicatorTotalMs = 0;
+    private long skipIndicatorLastMs = 0;
     private final Runnable skipRunnable = () -> {
-        if (!(isPlaying() || isPaused())) return; // in case we completed since this was requested
+        if (!(isPlaying() || isPaused())) {
+            skipRetries = 0;
+            return; // in case we completed since this was requested
+        }
 
+        if (wasSeeking && skipRetries++ < SKIP_MAX_RETRIES) {
+            mHandler.postDelayed(this.skipRunnable, SKIP_RETRY_MS);
+            return;
+        }
+
+        skipRetries = 0;
         seek(currentSkipPos);
         currentSkipPos = 0;
     };
 
+    // Chapter jumps wait this long for another one before seeking, so quick presses end in one seek
+    private static final int JUMP_COALESCE_MS = 200;
+
+    /**
+     * Goes to the start of the next chapter. It adds to a jump that is still on its way, so pressing it quickly goes
+     * on through the chapters, and it is not lost while an earlier seek is still going on (a seek then ignored it).
+     *
+     * @return The name of the chapter that is being jumped to (blank if it has none), or null when there is none.
+     */
+    public String jumpToNextChapter() {
+        BaseItemDto item = getCurrentlyPlayingItem();
+        if (item == null || item.getChapters() == null) return null;
+        if (!hasInitializedVideoManager() || !(isPlaying() || isPaused()) || !spinnerOff) return null;
+
+        refreshCurrentPosition();
+        long base = currentSkipPos != 0 ? currentSkipPos : (wasSeeking && mSeekPosition != -1 ? mSeekPosition : mCurrentPosition);
+
+        for (org.jellyfin.sdk.model.api.ChapterInfo chapter : item.getChapters()) {
+            long start = chapter.getStartPositionTicks() / 10000;
+            if (start > base + 1000) {
+                queueSeek(start);
+                return chapter.getName() != null ? chapter.getName() : "";
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Goes to a position the same way: after a short wait for more jumps, and again when a seek was still going on.
+     */
+    public void jumpTo(long pos) {
+        if (!hasInitializedVideoManager() || !(isPlaying() || isPaused())) {
+            seek(pos);
+            return;
+        }
+
+        queueSeek(pos);
+    }
+
+    private void queueSeek(long pos) {
+        mHandler.removeCallbacks(skipRunnable);
+        skipRetries = 0;
+        // A skip position of 0 means there is none waiting
+        currentSkipPos = Math.max(1, Utils.getSafeSeekPosition(pos, getDuration()));
+        mHandler.postDelayed(skipRunnable, JUMP_COALESCE_MS);
+    }
+
     private void skip(int msec) {
         if (hasInitializedVideoManager() && (isPlaying() || isPaused()) && spinnerOff && mVideoManager.getCurrentPosition() > 0) { //guard against skipping before playback has truly begun
             mHandler.removeCallbacks(skipRunnable);
+            skipRetries = 0;
             refreshCurrentPosition();
-            currentSkipPos = Utils.getSafeSeekPosition((currentSkipPos == 0 ? mCurrentPosition : currentSkipPos) + msec, getDuration());
+            // Add to the position that is already being skipped to, even while that seek is still going on
+            long basePosition = currentSkipPos != 0 ? currentSkipPos : (wasSeeking && mSeekPosition != -1 ? mSeekPosition : mCurrentPosition);
+            currentSkipPos = Utils.getSafeSeekPosition(basePosition + msec, getDuration());
+
+            long now = System.currentTimeMillis();
+            skipIndicatorTotalMs = (now - skipIndicatorLastMs <= SKIP_INDICATOR_MS ? skipIndicatorTotalMs : 0) + msec;
+            skipIndicatorLastMs = now;
+            if (mFragment != null) mFragment.showSkipIndicator(skipIndicatorTotalMs, SKIP_INDICATOR_MS);
 
             Timber.i("Skip amount requested was %s. Calculated position is %s", msec, currentSkipPos);
             Timber.i("Duration reported as: %s current pos: %s", getDuration(), mCurrentPosition);
 
             mSeekPosition = currentSkipPos;
-            mHandler.postDelayed(skipRunnable, 800);
+            mHandler.postDelayed(skipRunnable, SKIP_COALESCE_MS);
         }
     }
 

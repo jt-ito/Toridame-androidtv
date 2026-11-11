@@ -97,13 +97,13 @@ object BrowsingUtils {
 		limit = 50,
 		parentId = parentId,
 		imageTypeLimit = 1,
-		fields = ItemRepository.itemFields
+		fields = ItemRepository.browseFields
 	)
 
 	@JvmStatic
 	fun createSeriesGetNextUpRequest(parentId: UUID) = GetNextUpRequest(
 		seriesId = parentId,
-		fields = ItemRepository.itemFields
+		fields = ItemRepository.browseFields
 	)
 
 	@JvmStatic
@@ -113,7 +113,7 @@ object BrowsingUtils {
 		itemType: BaseItemKind? = null,
 		groupItems: Boolean? = null
 	) = GetLatestMediaRequest(
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 		parentId = parentId,
 		limit = 50,
 		imageTypeLimit = 1,
@@ -124,19 +124,19 @@ object BrowsingUtils {
 	@JvmStatic
 	fun createSeasonsRequest(seriesId: UUID) = GetSeasonsRequest(
 		seriesId = seriesId,
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 	)
 
 	@JvmStatic
 	fun createUpcomingEpisodesRequest(parentId: UUID) = GetUpcomingEpisodesRequest(
 		parentId = parentId,
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 	)
 
 	@JvmStatic
 	fun createSimilarItemsRequest(itemId: UUID) = GetSimilarItemsRequest(
 		itemId = itemId,
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 		limit = 20,
 	)
 
@@ -218,7 +218,7 @@ object BrowsingUtils {
 
 	@JvmStatic
 	fun createPersonItemsRequest(personId: UUID, itemType: BaseItemKind) = GetItemsRequest(
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 		personIds = setOf(personId),
 		recursive = true,
 		includeItemTypes = setOf(itemType),
@@ -238,7 +238,7 @@ object BrowsingUtils {
 
 	@JvmStatic
 	fun createNextEpisodesRequest(seasonId: UUID, indexNumber: Int) = GetItemsRequest(
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 		parentId = seasonId,
 		includeItemTypes = setOf(BaseItemKind.EPISODE),
 		startIndex = indexNumber,
@@ -274,7 +274,7 @@ object BrowsingUtils {
 
 	@JvmStatic
 	fun createCollectionsRequest(parentId: UUID) = GetItemsRequest(
-		fields = ItemRepository.itemFields,
+		fields = ItemRepository.browseFields,
 		includeItemTypes = setOf(BaseItemKind.BOX_SET),
 		recursive = true,
 		imageTypeLimit = 1,

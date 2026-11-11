@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -63,6 +64,22 @@ fun SettingsSubtitlesScreen() {
 				subtitlesTextColor = subtitlesTextColor,
 				subtitleTextStrokeColor = subtitleTextStrokeColor,
 				subtitlesTextSize = subtitlesTextSize,
+			)
+		}
+
+		// One-press looks; they set the options below, which can still be changed after
+		items(SubtitlePreset.entries) { preset ->
+			ListButton(
+				headingContent = { Text(stringResource(preset.nameRes)) },
+				captionContent = { Text(stringResource(R.string.subtitle_preset_caption)) },
+				onClick = {
+					subtitlesTextSize = preset.textSize
+					subtitlesTextWeight = preset.textWeight
+					subtitlesTextColor = preset.textColor
+					subtitlesBackgroundColor = preset.backgroundColor
+					subtitleTextStrokeColor = preset.strokeColor
+				},
+				modifier = Modifier.focusKey("subtitles_preset_${preset.name}")
 			)
 		}
 

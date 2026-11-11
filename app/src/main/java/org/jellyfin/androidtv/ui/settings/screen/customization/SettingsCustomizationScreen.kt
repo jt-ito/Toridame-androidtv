@@ -13,6 +13,8 @@ import androidx.work.WorkManager
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.integration.LeanbackChannelWorker
 import org.jellyfin.androidtv.preference.UserPreferences
+import org.jellyfin.androidtv.preference.UserSettingPreferences
+import org.jellyfin.androidtv.preference.constant.WatchProgressChip
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.form.Checkbox
@@ -71,6 +73,100 @@ fun SettingsCustomizationScreen() {
 				captionContent = { Text(stringResource(watchedIndicatorBehavior.nameRes)) },
 				onClick = { router.push(Routes.CUSTOMIZATION_WATCHED_INDICATOR) },
 				modifier = Modifier.focusKey(Routes.CUSTOMIZATION_WATCHED_INDICATOR)
+			)
+		}
+
+		item {
+			var watchProgressChip by rememberPreference(userPreferences, UserPreferences.watchProgressChip)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_watch_progress_chip)) },
+				captionContent = { Text(stringResource(watchProgressChip.nameRes)) },
+				// Each press moves to the next choice, there are only a few
+				onClick = {
+					watchProgressChip = WatchProgressChip.entries[(watchProgressChip.ordinal + 1) % WatchProgressChip.entries.size]
+				},
+			)
+		}
+
+		item {
+			var coloredRatings by rememberPreference(userPreferences, UserPreferences.coloredRatings)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_colored_ratings)) },
+				trailingContent = { Checkbox(checked = coloredRatings) },
+				captionContent = { Text(stringResource(R.string.pref_colored_ratings_description)) },
+				onClick = { coloredRatings = !coloredRatings },
+			)
+		}
+
+		item {
+			val userSettingPreferences = koinInject<UserSettingPreferences>()
+			var spoilerGuard by rememberPreference(userSettingPreferences, UserSettingPreferences.spoilerGuard)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_spoiler_guard)) },
+				trailingContent = { Checkbox(checked = spoilerGuard) },
+				captionContent = { Text(stringResource(R.string.pref_spoiler_guard_description)) },
+				onClick = { spoilerGuard = !spoilerGuard },
+			)
+		}
+
+		item {
+			var hiddenButton by rememberPreference(userPreferences, UserPreferences.hiddenContentButton)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_hidden_button)) },
+				trailingContent = { Checkbox(checked = hiddenButton) },
+				captionContent = { Text(stringResource(R.string.pref_hidden_button_description)) },
+				onClick = { hiddenButton = !hiddenButton },
+			)
+		}
+
+		item {
+			var lighterImages by rememberPreference(userPreferences, UserPreferences.lighterImages)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_lighter_images)) },
+				trailingContent = { Checkbox(checked = lighterImages) },
+				captionContent = { Text(stringResource(R.string.pref_lighter_images_description)) },
+				onClick = { lighterImages = !lighterImages },
+			)
+		}
+
+		item {
+			var homeHeader by rememberPreference(userPreferences, UserPreferences.homeHeader)
+
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_home_header)) },
+				trailingContent = { Checkbox(checked = homeHeader) },
+				captionContent = { Text(stringResource(R.string.pref_home_header_description)) },
+				onClick = { homeHeader = !homeHeader },
+			)
+		}
+
+		item {
+			ListButton(
+				headingContent = { Text(stringResource(R.string.pref_badges)) },
+				captionContent = { Text(stringResource(R.string.pref_badges_description)) },
+				onClick = { router.push(Routes.CUSTOMIZATION_BADGES) },
+				modifier = Modifier.focusKey(Routes.CUSTOMIZATION_BADGES)
+			)
+		}
+
+		item {
+			ListButton(
+				headingContent = { Text(stringResource(R.string.hidden_title)) },
+				onClick = { router.push(Routes.CUSTOMIZATION_HIDDEN) },
+				modifier = Modifier.focusKey(Routes.CUSTOMIZATION_HIDDEN)
+			)
+		}
+
+		item {
+			ListButton(
+				headingContent = { Text(stringResource(R.string.private_title)) },
+				onClick = { router.push(Routes.CUSTOMIZATION_PRIVATE) },
+				modifier = Modifier.focusKey(Routes.CUSTOMIZATION_PRIVATE)
 			)
 		}
 

@@ -4,7 +4,10 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemPerson
+import org.jellyfin.sdk.model.api.ImageFormat
 import org.jellyfin.sdk.model.api.ImageType
+import org.koin.mp.KoinPlatform
+import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.sdk.model.api.UserDto
 import java.util.UUID
 
@@ -33,17 +36,26 @@ fun JellyfinImage.getUrl(
 		tag = tag,
 	)
 
-	else -> api.imageApi.getItemImageUrl(
-		itemId = item,
-		imageType = type,
-		tag = tag,
-		imageIndex = index,
-		maxWidth = maxWidth,
-		maxHeight = maxHeight,
-		fillWidth = fillWidth,
-		fillHeight = fillHeight,
-	)
+	else -> {
+		val lighter = lighterImagesEnabled()
+		api.imageApi.getItemImageUrl(
+			itemId = item,
+			imageType = type,
+			tag = tag,
+			imageIndex = index,
+			maxWidth = maxWidth,
+			maxHeight = maxHeight,
+			fillWidth = fillWidth,
+			fillHeight = fillHeight,
+			format = if (lighter) ImageFormat.WEBP else null,
+			quality = if (lighter) LIGHTER_IMAGE_QUALITY else null,
+		)
+	}
 }
+
+private const val LIGHTER_IMAGE_QUALITY = 85
+
+private fun lighterImagesEnabled() = KoinPlatform.getKoin().get<UserPreferences>()[UserPreferences.lighterImages]
 
 enum class JellyfinImageSource {
 	ITEM,

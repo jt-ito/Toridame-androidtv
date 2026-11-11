@@ -1,5 +1,8 @@
 package org.jellyfin.androidtv.ui.home
 
+import org.jellyfin.sdk.model.api.request.GetItemsRequest
+import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.ItemFilter
 import android.content.Context
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.repository.UserRepository
@@ -40,6 +43,55 @@ class HomeFragmentHelper(
 
 	fun loadResumeVideo(): HomeFragmentRow {
 		return loadResume(context.getString(R.string.lbl_continue_watching), listOf(MediaType.VIDEO))
+	}
+
+	/** Continue watching and next up in one row. */
+	fun loadResumeNextUp(): HomeFragmentRow {
+		val resume = GetResumeItemsRequest(
+			limit = ITEM_LIMIT_RESUME,
+			fields = ItemRepository.browseFields,
+			imageTypeLimit = 1,
+			enableTotalRecordCount = false,
+			mediaTypes = listOf(MediaType.VIDEO),
+			excludeItemTypes = setOf(BaseItemKind.AUDIO_BOOK),
+		)
+
+		val maxDays = userPreferences[UserPreferences.homeNextUpMaxDays]
+		val nextUpDateCutoff = maxDays.takeIf { it > 0 }?.let { LocalDateTime.now().minusDays(it.toLong()) }
+		val nextUp = GetNextUpRequest(
+			imageTypeLimit = 1,
+			limit = ITEM_LIMIT_NEXT_UP,
+			enableResumable = false,
+			fields = ItemRepository.browseFields,
+			nextUpDateCutoff = nextUpDateCutoff,
+		)
+
+		return HomeFragmentBrowseRowDefRow(
+			BrowseRowDef(
+				context.getString(R.string.lbl_continue_watching),
+				resume,
+				nextUp,
+				false,
+				true,
+				arrayOf(ChangeTriggerType.TvPlayback, ChangeTriggerType.MoviePlayback),
+			)
+		)
+	}
+
+	/** The movies and series marked as favorite. */
+	fun loadFavorites(): HomeFragmentRow {
+		val query = GetItemsRequest(
+			includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+			filters = setOf(ItemFilter.IS_FAVORITE),
+			recursive = true,
+			sortBy = setOf(ItemSortBy.SORT_NAME),
+			fields = ItemRepository.browseFields,
+			imageTypeLimit = 1,
+			enableTotalRecordCount = false,
+			limit = ITEM_LIMIT_FAVORITES,
+		)
+
+		return HomeFragmentBrowseRowDefRow(BrowseRowDef(context.getString(R.string.lbl_favorites), query, 0, false, true, arrayOf(ChangeTriggerType.FavoriteUpdate)))
 	}
 
 	fun loadResumeAudio(): HomeFragmentRow {
@@ -89,5 +141,6 @@ class HomeFragmentHelper(
 		private const val ITEM_LIMIT_RECORDINGS = 40
 		private const val ITEM_LIMIT_NEXT_UP = 50
 		private const val ITEM_LIMIT_ON_NOW = 20
+		private const val ITEM_LIMIT_FAVORITES = 50
 	}
 }

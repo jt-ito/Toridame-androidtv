@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
@@ -20,6 +21,7 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.UserPreferences
+import org.jellyfin.androidtv.preference.constant.WatchProgressChip
 import org.jellyfin.androidtv.preference.constant.WatchedIndicatorBehavior
 import org.jellyfin.androidtv.ui.base.Badge
 import org.jellyfin.androidtv.ui.base.Icon
@@ -27,6 +29,7 @@ import org.jellyfin.androidtv.ui.base.Seekbar
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.composable.rememberPlayerProgress
 import org.jellyfin.androidtv.ui.composable.rememberQueueEntry
+import org.jellyfin.androidtv.util.formatWatchProgress
 import org.jellyfin.design.Tokens
 import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.playback.core.model.PlayState
@@ -51,15 +54,24 @@ fun ItemCardBaseItemOverlay(
 		modifier = Modifier.align(Alignment.TopStart),
 	)
 
-	WatchIndicator(
-		item = item,
-		modifier = Modifier.align(Alignment.TopEnd)
-	)
+	Column(
+		modifier = Modifier.align(Alignment.TopEnd),
+		horizontalAlignment = Alignment.End,
+		verticalArrangement = Arrangement.spacedBy(Tokens.Space.spaceXs)
+	) {
+		WatchIndicator(item = item)
+		InfoBadges(item = item)
+	}
 
 	Column(
 		modifier = Modifier.align(Alignment.BottomCenter),
 		verticalArrangement = Arrangement.spacedBy(Tokens.Space.spaceXs)
 	) {
+		WatchProgressChipIndicator(
+			item = item,
+			modifier = Modifier.align(Alignment.Start),
+		)
+
 		ProgressIndicator(
 			item = item,
 		)
@@ -101,6 +113,8 @@ private fun StateIndicator(
 					.size(24.dp)
 			)
 		}
+
+		QualityBadge(item = item)
 	}
 }
 
@@ -141,6 +155,87 @@ private fun WatchIndicator(
 				text = unplayedItems.toString(),
 			)
 		}
+	}
+}
+
+/**
+ * Small tags with the age rating and the score, when switched on in the settings.
+ */
+@Composable
+private fun InfoBadges(item: BaseItemDto) {
+	val userPreferences = koinInject<UserPreferences>()
+	if (!userPreferences[UserPreferences.badgesEnabled]) return
+
+	val ageRating = item.officialRating?.takeIf { userPreferences[UserPreferences.badgesAgeRating] && it.isNotBlank() }
+	val score = item.communityRating?.takeIf { userPreferences[UserPreferences.badgesScore] && it > 0f }
+
+	if (ageRating != null) {
+		Badge(shape = RoundedCornerShape(4.dp)) { Text(text = ageRating) }
+	}
+	if (score != null) {
+		Badge(shape = RoundedCornerShape(4.dp)) { Text(text = "\u2605 %.1f".format(score)) }
+	}
+}
+
+/**
+ * The picture size of a video (4K, 1080p...) as a small tag, when switched on in the settings.
+ */
+@Composable
+private fun QualityBadge(
+	item: BaseItemDto,
+	modifier: Modifier = Modifier,
+) {
+	val userPreferences = koinInject<UserPreferences>()
+	if (!userPreferences[UserPreferences.badgesEnabled] || !userPreferences[UserPreferences.badgesQuality]) return
+	if (item.type != BaseItemKind.MOVIE && item.type != BaseItemKind.EPISODE && item.type != BaseItemKind.VIDEO) return
+
+	val video = item.mediaStreams?.firstOrNull { it.type == org.jellyfin.sdk.model.api.MediaStreamType.VIDEO }
+	val label = resolutionLabel(item.width ?: video?.width ?: 0, item.height ?: video?.height ?: 0) ?: return
+
+	Badge(modifier = modifier, shape = RoundedCornerShape(4.dp)) { Text(text = label) }
+}
+
+private const val SIZE_8K_HEIGHT = 4300
+private const val SIZE_8K_WIDTH = 7600
+private const val SIZE_4K_HEIGHT = 2000
+private const val SIZE_4K_WIDTH = 3400
+private const val SIZE_1440_HEIGHT = 1400
+private const val SIZE_1440_WIDTH = 2500
+private const val SIZE_1080_HEIGHT = 1000
+private const val SIZE_1080_WIDTH = 1800
+private const val SIZE_720_HEIGHT = 700
+private const val SIZE_720_WIDTH = 1200
+
+/** The label for a picture size, from whichever side is larger so that wide crops still count. */
+private fun resolutionLabel(width: Int, height: Int): String? = when {
+	width <= 0 && height <= 0 -> null
+	height >= SIZE_8K_HEIGHT || width >= SIZE_8K_WIDTH -> "8K"
+	height >= SIZE_4K_HEIGHT || width >= SIZE_4K_WIDTH -> "4K"
+	height >= SIZE_1440_HEIGHT || width >= SIZE_1440_WIDTH -> "1440p"
+	height >= SIZE_1080_HEIGHT || width >= SIZE_1080_WIDTH -> "1080p"
+	height >= SIZE_720_HEIGHT || width >= SIZE_720_WIDTH -> "720p"
+	else -> "SD"
+}
+
+/**
+ * A small chip with how far into a started item the user is.
+ */
+@Composable
+private fun WatchProgressChipIndicator(
+	item: BaseItemDto,
+	modifier: Modifier = Modifier,
+) {
+	val userPreferences = koinInject<UserPreferences>()
+	val mode = userPreferences[UserPreferences.watchProgressChip]
+	if (mode == WatchProgressChip.OFF || item.mediaType !in progressMediaTypes) return
+
+	val text = formatWatchProgress(mode, item.userData?.playbackPositionTicks, item.runTimeTicks) ?: return
+
+	Badge(
+		modifier = modifier,
+		shape = RoundedCornerShape(4.dp),
+	) {
+		Text(text = text)
 	}
 }
 

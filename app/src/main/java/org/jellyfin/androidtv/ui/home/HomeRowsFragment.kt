@@ -1,5 +1,11 @@
 package org.jellyfin.androidtv.ui.home
 
+import org.jellyfin.sdk.model.api.SortOrder
+import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.CollectionType
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.api.client.extensions.itemsApi
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
@@ -15,6 +21,7 @@ import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -82,6 +89,19 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 	private var currentItem: BaseRowItem? = null
 	private var currentRow: ListRow? = null
 	private var justLoaded = true
+	private var serverEventRefresh: Job? = null
+
+	/** The title that has the focus, for the header above the rows. */
+	private val _focusedItem = kotlinx.coroutines.flow.MutableStateFlow<org.jellyfin.sdk.model.api.BaseItemDto?>(null)
+	val focusedItem: kotlinx.coroutines.flow.StateFlow<org.jellyfin.sdk.model.api.BaseItemDto?> = _focusedItem
+
+	/** How many titles the focused library holds and what was added to it last, for the header and the backdrop. */
+	private val libraryPreviews = mutableMapOf<java.util.UUID, LibraryPreview>()
+	private val _libraryPreview = kotlinx.coroutines.flow.MutableStateFlow<LibraryPreview?>(null)
+	val libraryPreview: kotlinx.coroutines.flow.StateFlow<LibraryPreview?> = _libraryPreview
+	private var libraryPreviewJob: Job? = null
+	private var libraryPreviewFor: java.util.UUID? = null
+	private var focusedLibraryId: java.util.UUID? = null
 
 	// Special rows
 	private val notificationsRow by lazy { NotificationsHomeFragmentRow(lifecycleScope, notificationsRepository) }
@@ -112,6 +132,8 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 				HomeSectionType.LIBRARY_TILES_SMALL -> rows.add(HomeFragmentViewsRow(small = false))
 				HomeSectionType.LIBRARY_BUTTONS -> rows.add(HomeFragmentViewsRow(small = true))
 				HomeSectionType.RESUME -> rows.add(helper.loadResumeVideo())
+				HomeSectionType.RESUME_NEXT_UP -> rows.add(helper.loadResumeNextUp())
+				HomeSectionType.FAVORITES -> rows.add(helper.loadFavorites())
 				HomeSectionType.RESUME_AUDIO -> rows.add(helper.loadResumeAudio())
 				HomeSectionType.RESUME_BOOK -> Unit // Books are not (yet) supported
 				HomeSectionType.ACTIVE_RECORDINGS -> rows.add(helper.loadLatestLiveTvRecordings())
@@ -168,11 +190,11 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 		lifecycleScope.launch {
 			lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
 				api.webSocket.subscribe<UserDataChangedMessage>()
-					.onEach { refreshRows(force = true, delayed = false) }
+					.onEach { refreshRowsAfterServerEvent() }
 					.launchIn(this)
 
 				api.webSocket.subscribe<LibraryChangedMessage>()
-					.onEach { refreshRows(force = true, delayed = false) }
+					.onEach { refreshRowsAfterServerEvent() }
 					.launchIn(this)
 			}
 		}
@@ -214,6 +236,18 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 
 		Timber.i("Updating audio queue in HomeFragment (onQueueStatusChanged)")
 		nowPlaying.update(requireContext(), adapter as MutableObjectAdapter<Row>)
+	}
+
+	/**
+	 * Library scans and other devices that are playing send a burst of events. Reloading every row for each of
+	 * them keeps the server and the TV busy for as long as the burst lasts, so wait until it has been quiet.
+	 */
+	private fun refreshRowsAfterServerEvent() {
+		serverEventRefresh?.cancel()
+		serverEventRefresh = lifecycleScope.launch {
+			delay(SERVER_EVENT_QUIET_PERIOD)
+			refreshRows(force = true, delayed = false)
+		}
 	}
 
 	private fun refreshRows(force: Boolean = false, delayed: Boolean = true) {
@@ -272,6 +306,8 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 			rowViewHolder: RowPresenter.ViewHolder?,
 			row: Row?,
 		) {
+			_focusedItem.value = (item as? BaseRowItem)?.baseItem
+
 			if (item !is BaseRowItem) {
 				currentItem = null
 				//fill in default background
@@ -284,7 +320,83 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 				itemRowAdapter?.loadMoreItemsIfNeeded(itemRowAdapter.indexOf(item))
 
 				backgroundService.setBackground(item.baseItem)
+
+				// A library has no backdrop of its own: borrow the one of what was added to it last
+				val focused = item.baseItem
+				if (focused?.type == BaseItemKind.USER_VIEW || focused?.type == BaseItemKind.COLLECTION_FOLDER) {
+					focusedLibraryId = focused.id
+					showLibraryPreview(focused)
+				} else {
+					focusedLibraryId = null
+					_libraryPreview.value = null
+				}
 			}
 		}
 	}
+
+	private fun showLibraryPreview(library: BaseItemDto) {
+		libraryPreviews[library.id]?.let {
+			libraryPreviewJob?.cancel()
+			libraryPreviewFor = null
+			applyLibraryPreview(it)
+			return
+		}
+
+		// The selection is reported again and again while the page loads: let the lookup that is on its way finish
+		if (libraryPreviewFor == library.id && libraryPreviewJob?.isActive == true) return
+
+		libraryPreviewJob?.cancel()
+		libraryPreviewFor = library.id
+		_libraryPreview.value = null
+		libraryPreviewJob = lifecycleScope.launch {
+			try {
+				val result = runCatching {
+					withContext(Dispatchers.IO) {
+						api.itemsApi.getItems(
+							parentId = library.id,
+							recursive = true,
+							includeItemTypes = when (library.collectionType) {
+								CollectionType.MOVIES -> setOf(BaseItemKind.MOVIE)
+								CollectionType.TVSHOWS -> setOf(BaseItemKind.SERIES)
+								CollectionType.MUSIC -> setOf(BaseItemKind.MUSIC_ALBUM)
+								CollectionType.HOMEVIDEOS -> setOf(BaseItemKind.VIDEO)
+								CollectionType.BOXSETS -> setOf(BaseItemKind.BOX_SET)
+								else -> null
+							},
+							sortBy = setOf(ItemSortBy.DATE_CREATED),
+							sortOrder = setOf(SortOrder.DESCENDING),
+							limit = LIBRARY_PREVIEW_ITEMS,
+							enableTotalRecordCount = true,
+						).content
+					}
+				}.onFailure { Timber.w(it, "Could not look up the library") }.getOrNull() ?: return@launch
+
+				val preview = LibraryPreview(library.id, result.totalRecordCount, result.items)
+				libraryPreviews[library.id] = preview
+				applyLibraryPreview(preview)
+			} finally {
+				if (libraryPreviewFor == library.id) libraryPreviewFor = null
+			}
+		}
+	}
+
+	private fun applyLibraryPreview(preview: LibraryPreview) {
+		// The focus may have moved on to something else while it was loading
+		if (focusedLibraryId != preview.libraryId) return
+
+		_libraryPreview.value = preview
+		preview.latest.firstOrNull()?.let { backgroundService.setBackground(it) }
+	}
+
+	private companion object {
+		val SERVER_EVENT_QUIET_PERIOD = 3.seconds
+		const val LIBRARY_PREVIEW_ITEMS = 3
+	}
 }
+
+/** A library: how many titles it holds, and the ones added to it last. */
+data class LibraryPreview(
+	val libraryId: java.util.UUID,
+	val count: Int,
+	val latest: List<BaseItemDto>,
+)

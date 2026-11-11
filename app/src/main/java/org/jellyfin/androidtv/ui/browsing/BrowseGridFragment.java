@@ -171,6 +171,9 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
             sortOptions.put(4, new SortOption(getString(R.string.lbl_community_rating), ItemSortBy.COMMUNITY_RATING, SortOrder.DESCENDING));
             sortOptions.put(5, new SortOption(getString(R.string.lbl_critic_rating), ItemSortBy.CRITIC_RATING, SortOrder.DESCENDING));
 
+            sortOptions.put(8, new SortOption(getString(R.string.lbl_year), ItemSortBy.PRODUCTION_YEAR, SortOrder.DESCENDING));
+            sortOptions.put(9, new SortOption(getString(R.string.lbl_play_count), ItemSortBy.PLAY_COUNT, SortOrder.DESCENDING));
+
             if (isTvShows) {
                 sortOptions.put(6, new SortOption(getString(R.string.lbl_last_played), ItemSortBy.SERIES_DATE_PLAYED, SortOrder.DESCENDING));
                 sortOptions.put(7, new SortOption(getString(R.string.lbl_date_episode_added), ItemSortBy.DATE_LAST_CONTENT_ADDED, SortOrder.DESCENDING));
@@ -299,6 +302,7 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
     }
 
     private Map<Integer, SortOption> sortOptions;
+    private static final int SORT_REVERSE_ID = 100;
 
     private SortOption getSortOption(ItemSortBy value) {
         for (SortOption sortOption : sortOptions.values()) {
@@ -322,7 +326,8 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
             text += " " + getString(R.string.lbl_starting_with) + " " + mAdapter.getStartLetter();
         }
 
-        text += " " + getString(R.string.lbl_from) + " '" + folderName + "' " + getString(R.string.lbl_sorted_by) + " " + getSortOption(mAdapter.getSortBy()).name;
+        text += " " + getString(R.string.lbl_from) + " '" + folderName + "' " + getString(R.string.lbl_sorted_by) + " " + getSortOption(mAdapter.getSortBy()).name
+                + (SortOrder.DESCENDING.equals(mAdapter.getSortOrder()) ? " \u2193" : " \u2191");
 
         binding.statusText.setText(text);
     }
@@ -697,7 +702,9 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
             buildAdapter();
         }
 
-        mAdapter.setSortBy(getSortOption(libraryPreferences.get(LibraryPreferences.Companion.getSortBy())));
+        // The direction that was picked last is used too, not only the kind of sort
+        SortOption saved = getSortOption(libraryPreferences.get(LibraryPreferences.Companion.getSortBy()));
+        mAdapter.setSortBy(new SortOption(saved.name, saved.value, libraryPreferences.get(LibraryPreferences.Companion.getSortOrder())));
         mAdapter.Retrieve();
     }
 
@@ -712,7 +719,7 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
             libraryPreferences.set(LibraryPreferences.Companion.getFilterFavoritesOnly(), mAdapter.getFilters().isFavoriteOnly());
             libraryPreferences.set(LibraryPreferences.Companion.getFilterUnwatchedOnly(), mAdapter.getFilters().isUnwatchedOnly());
             libraryPreferences.set(LibraryPreferences.Companion.getSortBy(), mAdapter.getSortBy());
-            libraryPreferences.set(LibraryPreferences.Companion.getSortOrder(), getSortOption(mAdapter.getSortBy()).order);
+            libraryPreferences.set(LibraryPreferences.Companion.getSortOrder(), mAdapter.getSortOrder());
             return libraryPreferences.commit(continuation);
         });
     }
@@ -735,9 +742,25 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
                     item.setChecked(entry.getValue().value.equals(libraryPreferences.get(LibraryPreferences.Companion.getSortBy())));
                 }
                 sortMenu.getMenu().setGroupCheckable(0, true, true);
+
+                // Flips the direction of the sort that is chosen: Z to A, oldest first, lowest rating first...
+                SortOption current = getSortOption(mAdapter.getSortBy());
+                MenuItem reverse = sortMenu.getMenu().add(1, SORT_REVERSE_ID, SORT_REVERSE_ID, getString(R.string.lbl_reverse_order));
+                reverse.setCheckable(true);
+                reverse.setChecked(!current.order.equals(mAdapter.getSortOrder()));
                 sortMenu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
                     @Override
                     public boolean onMenuItemClick(MenuItem item) {
+                        if (item.getItemId() == SORT_REVERSE_ID) {
+                            SortOption now = getSortOption(mAdapter.getSortBy());
+                            SortOrder flipped = SortOrder.DESCENDING.equals(mAdapter.getSortOrder()) ? SortOrder.ASCENDING : SortOrder.DESCENDING;
+                            mAdapter.setSortBy(new SortOption(now.name, now.value, flipped));
+                            mAdapter.Retrieve();
+                            updateDisplayPrefs();
+                            setStatusText(mFolder.getName());
+                            return true;
+                        }
+
                         mAdapter.setSortBy(Objects.requireNonNull(sortOptions.get(item.getItemId())));
                         mAdapter.Retrieve();
                         item.setChecked(true);

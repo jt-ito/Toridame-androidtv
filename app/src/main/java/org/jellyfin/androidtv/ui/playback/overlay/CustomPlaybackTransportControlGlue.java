@@ -23,9 +23,14 @@ import androidx.leanback.widget.PlaybackTransportRowView;
 import androidx.leanback.widget.RowPresenter;
 
 import org.jellyfin.androidtv.R;
+import org.jellyfin.androidtv.data.repository.BookmarkRepository;
 import org.jellyfin.androidtv.preference.UserPreferences;
 import org.jellyfin.androidtv.preference.constant.ClockBehavior;
 import org.jellyfin.androidtv.ui.playback.PlaybackController;
+import org.jellyfin.androidtv.ui.playback.PlaybackShortcuts;
+import org.jellyfin.androidtv.ui.playback.overlay.action.BookmarkAction;
+import org.jellyfin.androidtv.ui.playback.overlay.action.EpisodeListAction;
+import org.jellyfin.sdk.model.api.BaseItemKind;
 import org.jellyfin.androidtv.ui.playback.overlay.action.AndroidAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.ChannelBarChannelAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.ChapterAction;
@@ -33,6 +38,7 @@ import org.jellyfin.androidtv.ui.playback.overlay.action.ClosedCaptionsAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.CustomAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.FastForwardAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.GuideAction;
+import org.jellyfin.androidtv.ui.playback.overlay.action.NextChapterAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.PlayPauseAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.PlaybackSpeedAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.PreviousLiveTvChannelAction;
@@ -40,6 +46,7 @@ import org.jellyfin.androidtv.ui.playback.overlay.action.RecordAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.RewindAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.SelectAudioAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.SelectQualityAction;
+import org.jellyfin.androidtv.ui.playback.overlay.action.SettingsMenuAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.SkipNextAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.SkipPreviousAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.ZoomAction;
@@ -48,6 +55,10 @@ import org.koin.java.KoinJavaComponent;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+
+import kotlin.Pair;
 
 public class CustomPlaybackTransportControlGlue extends PlaybackTransportControlGlue<VideoPlayerAdapter> {
 
@@ -55,6 +66,8 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
     private PlayPauseAction playPauseAction;
     private RewindAction rewindAction;
     private FastForwardAction fastForwardAction;
+    private BookmarkAction bookmarkAction;
+    private EpisodeListAction episodeListAction;
     private SkipPreviousAction skipPreviousAction;
     private SkipNextAction skipNextAction;
     private SelectAudioAction selectAudioAction;
@@ -63,6 +76,9 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
     private PlaybackSpeedAction playbackSpeedAction;
     private ZoomAction zoomAction;
     private ChapterAction chapterAction;
+    private NextChapterAction nextChapterAction;
+    private SettingsMenuAction settingsMenuAction;
+    private final BookmarkMarkers bookmarkMarkers = new BookmarkMarkers(KoinJavaComponent.get(BookmarkRepository.class));
 
     // TV actions
     private PreviousLiveTvChannelAction previousLiveTvChannelAction;
@@ -82,6 +98,7 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
     private Runnable mRefreshViewVisibility;
 
     private LinearLayout mButtonRef;
+    private View mRowView;
 
     CustomPlaybackTransportControlGlue(Context context, VideoPlayerAdapter playerAdapter, PlaybackController playbackController) {
         super(context, playerAdapter);
@@ -114,6 +131,7 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         selectAudioAction.dismissPopup();
         selectQualityAction.dismissPopup();
         zoomAction.dismissPopup();
+        settingsMenuAction.removePopup();
 
         super.onDetachedFromHost();
     }
@@ -130,6 +148,17 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
             @Override
             protected RowPresenter.ViewHolder createRowViewHolder(ViewGroup parent) {
                 RowPresenter.ViewHolder vh = super.createRowViewHolder(parent);
+                mRowView = vh.view;
+
+                View seekBar = vh.view.findViewById(androidx.leanback.R.id.playback_progress);
+                if (seekBar != null) bookmarkMarkers.attach(seekBar, () -> getPlayerAdapter().getDuration());
+
+                // Use more of the width: the theme's side margins are wide
+                if (vh.view instanceof LinearLayout && ((LinearLayout) vh.view).getChildCount() > 1) {
+                    View transportRow = ((LinearLayout) vh.view).getChildAt(1);
+                    int side = Math.round(32 * parent.getResources().getDisplayMetrics().density);
+                    transportRow.setPadding(side, transportRow.getPaddingTop(), side, transportRow.getPaddingBottom());
+                }
 
                 ClockBehavior showClock = KoinJavaComponent.<UserPreferences>get(UserPreferences.class).get(UserPreferences.Companion.getClockBehavior());
 
@@ -150,6 +179,8 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
                     RelativeLayout.LayoutParams rlp = new RelativeLayout.LayoutParams(
                             RelativeLayout.LayoutParams.WRAP_CONTENT,
                             RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    // The row of buttons that used to be here is empty now, keep some height for the text
+                    rl.setMinimumHeight(Math.round(28 * context.getResources().getDisplayMetrics().density));
                     rl.addView(v);
 
                     RelativeLayout.LayoutParams rlp2 = new RelativeLayout.LayoutParams(
@@ -159,6 +190,19 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
                     rlp2.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
                     rl.addView(mEndsText, rlp2);
                     bar.addView(rl, 0, rlp);
+                }
+
+                // Leanback puts this row above the progress bar; it goes next to the playback buttons instead
+                View dock = vh.view.findViewById(androidx.leanback.R.id.controls_dock);
+                View below = vh.view.findViewById(androidx.leanback.R.id.secondary_controls_dock);
+                if (dock != null && dock.getParent() instanceof ViewGroup
+                        && below != null && below.getParent() instanceof RelativeLayout) {
+                    ((ViewGroup) dock.getParent()).removeView(dock);
+                    RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(
+                            RelativeLayout.LayoutParams.WRAP_CONTENT, RelativeLayout.LayoutParams.WRAP_CONTENT);
+                    lp.addRule(RelativeLayout.RIGHT_OF, below.getId());
+                    lp.addRule(RelativeLayout.ALIGN_TOP, below.getId());
+                    ((RelativeLayout) below.getParent()).addView(dock, lp);
                 }
 
                 return vh;
@@ -202,7 +246,15 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         playbackSpeedAction.setLabels(new String[]{context.getString(R.string.lbl_playback_speed)});
         zoomAction = new ZoomAction(context, this);
         zoomAction.setLabels(new String[]{context.getString(R.string.lbl_zoom)});
+        bookmarkAction = new BookmarkAction(context, this);
+        bookmarkAction.setLabels(new String[]{context.getString(R.string.bookmarks)});
+        episodeListAction = new EpisodeListAction(context, this);
+        episodeListAction.setLabels(new String[]{context.getString(R.string.episodes_list)});
         chapterAction = new ChapterAction(context, this);
+        nextChapterAction = new NextChapterAction(context, this);
+        settingsMenuAction = new SettingsMenuAction(context, this);
+        settingsMenuAction.setLabels(new String[]{context.getString(R.string.player_more)});
+        nextChapterAction.setLabels(new String[]{context.getString(R.string.next_chapter)});
         chapterAction.setLabels(new String[]{context.getString(R.string.lbl_chapters)});
 
         previousLiveTvChannelAction = new PreviousLiveTvChannelAction(context, this);
@@ -234,55 +286,64 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         if (secondaryActionsAdapter.size() > 0)
             secondaryActionsAdapter.clear();
 
-        // Primary Items
-        primaryActionsAdapter.add(playPauseAction);
         VideoPlayerAdapter playerAdapter = getPlayerAdapter();
 
-        if (playerAdapter.canSeek()) {
-            primaryActionsAdapter.add(rewindAction);
-            primaryActionsAdapter.add(fastForwardAction);
-        }
+        // Playback: play sits between going back and skipping forward
+        List<Action> main = new ArrayList<>();
+        if (playerAdapter.hasPreviousItem()) main.add(skipPreviousAction);
+        if (playerAdapter.canSeek()) main.add(rewindAction);
+        main.add(playPauseAction);
+        if (playerAdapter.canSeek()) main.add(fastForwardAction);
+        if (playerAdapter.hasChapters() && !playerAdapter.isLiveTv()) main.add(nextChapterAction);
+        if (playerAdapter.hasNextItem()) main.add(skipNextAction);
 
-        if (playerAdapter.hasSubs()) {
-            primaryActionsAdapter.add(closedCaptionsAction);
-        }
+        // Next to it: subtitles, the episodes, and the gear with the rest in a menu
+        List<Action> side = new ArrayList<>();
+        List<Pair<String, CustomAction>> menu = new ArrayList<>();
+        Context context = getContext();
 
-        if (playerAdapter.hasMultiAudio()) {
-            primaryActionsAdapter.add(selectAudioAction);
-        }
+        if (playerAdapter.hasSubs()) side.add(closedCaptionsAction);
+        if (playerAdapter.hasMultiAudio()) menu.add(new Pair<>(context.getString(R.string.lbl_audio_track), selectAudioAction));
 
         if (playerAdapter.isLiveTv()) {
-            primaryActionsAdapter.add(channelBarChannelAction);
-            primaryActionsAdapter.add(guideAction);
-        }
-
-        // Secondary Items
-        if (playerAdapter.isLiveTv()) {
-            secondaryActionsAdapter.add(previousLiveTvChannelAction);
+            side.add(channelBarChannelAction);
+            side.add(guideAction);
+            side.add(previousLiveTvChannelAction);
             if (playerAdapter.canRecordLiveTv()) {
-                secondaryActionsAdapter.add(recordAction);
+                side.add(recordAction);
                 recordingStateChanged();
             }
         }
 
-        if (playerAdapter.hasPreviousItem()) {
-            secondaryActionsAdapter.add(skipPreviousAction);
-        }
-
-        if (playerAdapter.hasNextItem()) {
-            secondaryActionsAdapter.add(skipNextAction);
-        }
-
-        if (playerAdapter.hasChapters()) {
-            secondaryActionsAdapter.add(chapterAction);
-        }
+        if (playerAdapter.hasChapters()) menu.add(new Pair<>(context.getString(R.string.lbl_chapters), chapterAction));
 
         if (!playerAdapter.isLiveTv()) {
-            secondaryActionsAdapter.add(playbackSpeedAction);
-            secondaryActionsAdapter.add(selectQualityAction);
+            // Episodes list their season; movies and other videos list their folder, collections and versions
+            side.add(episodeListAction);
+            menu.add(new Pair<>(context.getString(R.string.bookmarks), bookmarkAction));
+            menu.add(new Pair<>(context.getString(R.string.lbl_playback_speed), playbackSpeedAction));
+            menu.add(new Pair<>(context.getString(R.string.lbl_quality_profile), selectQualityAction));
         }
 
-        secondaryActionsAdapter.add(zoomAction);
+        menu.add(new Pair<>(context.getString(R.string.lbl_zoom), zoomAction));
+        settingsMenuAction.setEntries(menu);
+        side.add(settingsMenuAction);
+
+        secondaryActionsAdapter.addAll(0, main);
+        primaryActionsAdapter.addAll(0, side);
+
+        if (playerAdapter.isLiveTv()) bookmarkMarkers.clear();
+        else refreshBookmarkMarkers();
+    }
+
+    /** Shows the bookmarks of the video that is playing as ticks on the seek bar. */
+    public void refreshBookmarkMarkers() {
+        androidx.fragment.app.Fragment fragment = playbackController.getFragment();
+        org.jellyfin.sdk.model.api.BaseItemDto item = playbackController.getCurrentlyPlayingItem();
+        if (fragment == null || item == null) return;
+
+        bookmarkMarkers.setChapters(item);
+        bookmarkMarkers.refresh(androidx.lifecycle.LifecycleOwnerKt.getLifecycleScope(fragment), item.getId());
     }
 
     @Override
@@ -373,6 +434,11 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
 
     @Override
     public boolean onKey(View v, int keyCode, KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+            View focused = v.findFocus() != null ? v.findFocus() : v;
+            if (focused.getId() == androidx.leanback.R.id.playback_progress && focusPlayButton()) return true;
+        }
+
         if (event.getAction() != KeyEvent.ACTION_UP) {
             // Let the playback glue handle the key before applying the focus fallback below.
             if (super.onKey(v, keyCode, event)) return true;
@@ -385,6 +451,10 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
 
         VideoPlayerAdapter playerAdapter = getPlayerAdapter();
 
+        if (event.getAction() == KeyEvent.ACTION_UP && PlaybackShortcuts.handle(keyCode, playbackController)) {
+            return true;
+        }
+
         if (playerAdapter.hasSubs() && keyCode == KeyEvent.KEYCODE_CAPTIONS) {
             closedCaptionsAction.handleClickAction(playbackController, getPlayerAdapter(), getContext(), v);
         }
@@ -392,6 +462,23 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
             selectAudioAction.handleClickAction(playbackController, getPlayerAdapter(), getContext(), v);
         }
         return super.onKey(v, keyCode, event);
+    }
+
+    /**
+     * Moves the focus to the play button in the row of buttons. Leanback would pick the first button, or the one
+     * that had the focus last.
+     */
+    public boolean focusPlayButton() {
+        if (mRowView == null || secondaryActionsAdapter == null) return false;
+
+        int index = secondaryActionsAdapter.indexOf(playPauseAction);
+        View dock = mRowView.findViewById(androidx.leanback.R.id.secondary_controls_dock);
+        if (index < 0 || !(dock instanceof ViewGroup) || ((ViewGroup) dock).getChildCount() == 0) return false;
+
+        View bar = ((ViewGroup) dock).getChildAt(0);
+        if (!(bar instanceof ViewGroup) || index >= ((ViewGroup) bar).getChildCount()) return false;
+
+        return ((ViewGroup) bar).getChildAt(index).requestFocus();
     }
 
     private boolean moveFocus(View root, int keyCode) {

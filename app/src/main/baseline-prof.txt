@@ -1,0 +1,11 @@
+# Methods and classes worth compiling ahead of time, so the first minutes after an install or an update are not slow.
+# The wildcards are expanded against what is in the app at build time.
+HSPLorg/jellyfin/androidtv/**;->**(**)**
+Lorg/jellyfin/androidtv/**;
+HSPLandroidx/leanback/**;->**(**)**
+Landroidx/leanback/**;
+HSPLandroidx/recyclerview/widget/**;->**(**)**
+HSPLandroidx/compose/runtime/**;->**(**)**
+HSPLandroidx/compose/ui/**;->**(**)**
+HSPLandroidx/compose/foundation/**;->**(**)**
+HSPLcoil3/**;->**(**)**

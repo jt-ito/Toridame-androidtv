@@ -46,6 +46,16 @@ open class MutableObjectAdapter<T : Any> : ObjectAdapter, Iterable<T> {
 		areItemsTheSame: (old: T, new: T) -> Boolean = { old, new -> old == new },
 		areContentsTheSame: (old: T, new: T) -> Boolean = { old, new -> old == new },
 	) {
+		// Loading the next page of a long list only adds items at the end: skip the diff of everything before them
+		if (items.size >= data.size && data.indices.all { areItemsTheSame(data[it], items[it]) && areContentsTheSame(data[it], items[it]) }) {
+			val start = data.size
+			if (items.size > start) {
+				data.addAll(items.subList(start, items.size))
+				notifyItemRangeInserted(start, items.size - start)
+			}
+			return
+		}
+
 		val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
 			override fun getOldListSize(): Int = data.size
 			override fun getNewListSize(): Int = items.size

@@ -3,6 +3,7 @@ package org.jellyfin.androidtv.ui.settings
 import org.jellyfin.androidtv.preference.constant.BitstreamAudioFormat
 import org.jellyfin.androidtv.preference.constant.HdrFormat
 import org.jellyfin.androidtv.ui.navigation.RouteComposable
+import org.jellyfin.androidtv.ui.settings.screen.SettingsActivityFeedScreen
 import org.jellyfin.androidtv.ui.settings.screen.SettingsDeveloperScreen
 import org.jellyfin.androidtv.ui.settings.screen.SettingsMainScreen
 import org.jellyfin.androidtv.ui.settings.screen.SettingsTelemetryScreen
@@ -14,7 +15,10 @@ import org.jellyfin.androidtv.ui.settings.screen.authentication.SettingsAuthenti
 import org.jellyfin.androidtv.ui.settings.screen.authentication.SettingsAuthenticationSortByScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsCustomizationBackdropScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsCustomizationClockScreen
+import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsBadgesScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsCustomizationScreen
+import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsHiddenContentScreen
+import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsPrivateLibrariesScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsCustomizationThemeScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsCustomizationWatchedIndicatorScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.subtitle.SettingsSubtitleTextStrokeColorScreen
@@ -51,6 +55,7 @@ import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackPrerol
 import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackRefreshRateSwitchingBehaviorScreen
 import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackResumeSubtractDurationScreen
 import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackScreen
+import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackShortcutsScreen
 import org.jellyfin.androidtv.ui.settings.screen.playback.SettingsPlaybackZoomModeScreen
 import org.jellyfin.androidtv.ui.settings.screen.playback.mediasegment.SettingsPlaybackMediaSegmentScreen
 import org.jellyfin.androidtv.ui.settings.screen.playback.mediasegment.SettingsPlaybackMediaSegmentsScreen
@@ -75,6 +80,9 @@ object Routes {
 	const val CUSTOMIZATION_CLOCK = "/customization/clock"
 	const val CUSTOMIZATION_WATCHED_INDICATOR = "/customization/watch-indicators"
 	const val CUSTOMIZATION_BACKDROP = "/customization/backdrop"
+	const val CUSTOMIZATION_HIDDEN = "/customization/hidden"
+	const val CUSTOMIZATION_BADGES = "/customization/badges"
+	const val CUSTOMIZATION_PRIVATE = "/customization/private"
 	const val CUSTOMIZATION_SCREENSAVER = "/customization/screensaver"
 	const val CUSTOMIZATION_SCREENSAVER_TIMEOUT = "/customization/screensaver/timeout"
 	const val CUSTOMIZATION_SCREENSAVER_AGE_RATING = "/customization/screensaver/age-rating"
@@ -103,6 +111,8 @@ object Routes {
 	const val PLAYBACK_MEDIA_SEGMENTS = "/playback/media-segments"
 	const val PLAYBACK_MEDIA_SEGMENT = "/playback/media-segments/{segmentType}"
 	const val PLAYBACK_ADVANCED = "/playback/advanced"
+	const val PLAYBACK_SHORTCUTS = "/playback/shortcuts"
+	const val ACTIVITY = "/activity"
 	const val PLAYBACK_RESUME_SUBTRACT_DURATION = "/playback/resume-subtract-duration"
 	const val PLAYBACK_MAX_BITRATE = "/playback/max-bitrate"
 	const val PLAYBACK_REFRESH_RATE_SWITCHING_BEHAVIOR = "/playback/refresh-rate-switching-behavior"
@@ -252,6 +262,21 @@ val routes = mapOf<String, RouteComposable>(
 		SettingsPlaybackMediaSegmentScreen(
 			segmentType = context.parameters["segmentType"]?.let(MediaSegmentType::fromNameOrNull)!!,
 		)
+	},
+	Routes.CUSTOMIZATION_BADGES to {
+		SettingsBadgesScreen()
+	},
+	Routes.CUSTOMIZATION_HIDDEN to {
+		SettingsHiddenContentScreen()
+	},
+	Routes.CUSTOMIZATION_PRIVATE to {
+		SettingsPrivateLibrariesScreen()
+	},
+	Routes.ACTIVITY to {
+		SettingsActivityFeedScreen()
+	},
+	Routes.PLAYBACK_SHORTCUTS to {
+		SettingsPlaybackShortcutsScreen()
 	},
 	Routes.PLAYBACK_ADVANCED to {
 		SettingsPlaybackAdvancedScreen()

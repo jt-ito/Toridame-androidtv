@@ -16,7 +16,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.vectorResource
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.util.initialsOf
 
 @Composable
 fun ProfilePicture(
@@ -24,6 +27,7 @@ fun ProfilePicture(
 	modifier: Modifier = Modifier,
 	contentDescription: String? = null,
 	iconPadding: PaddingValues = PaddingValues.Zero,
+	name: String? = null,
 ) {
 	Box(
 		modifier = modifier
@@ -32,7 +36,17 @@ fun ProfilePicture(
 		val userImageState by userImagePainter.state.collectAsState()
 		val userImageVisible = userImageState is AsyncImagePainter.State.Success
 
-		if (!userImageVisible) {
+		val initials = initialsOf(name)
+
+		if (!userImageVisible && initials.isNotEmpty()) {
+			// No picture: the first letters of the name, like the web client
+			Text(
+				text = initials,
+				fontSize = if (initials.length > 1) 15.sp else 19.sp,
+				fontWeight = FontWeight.Bold,
+				modifier = Modifier.align(Alignment.Center),
+			)
+		} else if (!userImageVisible) {
 			Icon(
 				imageVector = ImageVector.vectorResource(R.drawable.ic_user),
 				contentDescription = contentDescription,

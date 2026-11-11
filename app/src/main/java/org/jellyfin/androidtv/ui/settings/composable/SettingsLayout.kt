@@ -24,8 +24,9 @@ fun SettingsLayout(
 		modifier = modifier
 			.padding(Tokens.Space.spaceMd)
 			.clip(LocalShapes.current.large)
-			.background(JellyfinTheme.colorScheme.surface)
-			.width(350.dp)
+			// The darkest color of the theme, not the gray of its panels
+			.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.97f))
+			.width(460.dp)
 			.fillMaxHeight()
 			.focusRestorer(),
 		content = content

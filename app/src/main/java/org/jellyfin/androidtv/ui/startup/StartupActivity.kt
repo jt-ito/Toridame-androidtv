@@ -33,7 +33,6 @@ import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.eventhandling.SocketHandler
 import org.jellyfin.androidtv.databinding.ActivityStartupBinding
 import org.jellyfin.androidtv.integration.LeanbackChannelWorker
-import org.jellyfin.androidtv.ui.background.AppBackground
 import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.navigation.Destinations
@@ -92,7 +91,7 @@ class StartupActivity : FragmentActivity() {
 		super.onCreate(savedInstanceState)
 
 		binding = ActivityStartupBinding.inflate(layoutInflater)
-		binding.background.setContent { AppBackground() }
+		binding.background.setContent { StartupBackground() }
 		binding.screensaver.isVisible = false
 		setContentView(binding.root)
 

@@ -40,10 +40,10 @@
 
     </FrameLayout>
 
-    <FrameLayout
+    <androidx.leanback.widget.BrowseFrameLayout
         android:id="@+id/popupArea"
         android:layout_width="fill_parent"
-        android:layout_height="225dp"
+        android:layout_height="270dp"
         android:layout_gravity="bottom"
         android:background="@color/black_transparent"
         android:visibility="gone">
@@ -55,7 +55,7 @@
             android:layout_gravity="start|bottom"
             android:layout_marginTop="16dp"
             android:orientation="horizontal" />
-    </FrameLayout>
+    </androidx.leanback.widget.BrowseFrameLayout>
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/topPanel"
@@ -115,6 +115,22 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <TextView
+        android:id="@+id/skip_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|bottom"
+        android:layout_marginBottom="140dp"
+        android:background="@drawable/skip_indicator_background"
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="10dp"
+        android:textColor="@color/white"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:text="» +30s"
+        tools:visibility="visible" />
 
     <org.jellyfin.androidtv.ui.playback.overlay.SkipOverlayView
         android:id="@+id/skip_overlay"

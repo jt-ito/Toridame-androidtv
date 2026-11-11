@@ -6,6 +6,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.preference.UserPreferences
+import org.jellyfin.androidtv.util.RatingTone
+import org.jellyfin.androidtv.util.getRatingTone
+import org.koin.compose.koinInject
 import org.jellyfin.androidtv.ui.base.Text
 import java.text.NumberFormat
 
@@ -51,9 +55,17 @@ fun InfoRowCriticRating(criticRating: Float) {
  */
 @Composable
 fun InfoRowParentalRating(parentalRating: String) {
+	val userPreferences = koinInject<UserPreferences>()
+	val colored = userPreferences[UserPreferences.coloredRatings]
+
 	InfoRowItem(
 		contentDescription = stringResource(R.string.lbl_rating),
-		colors = InfoRowColors.Default,
+		colors = when (if (colored) getRatingTone(parentalRating) else null) {
+			RatingTone.ALL -> InfoRowColors.Green
+			RatingTone.TEEN -> InfoRowColors.Amber
+			RatingTone.MATURE -> InfoRowColors.Red
+			null -> InfoRowColors.Default
+		},
 	) {
 		Text(parentalRating)
 	}
