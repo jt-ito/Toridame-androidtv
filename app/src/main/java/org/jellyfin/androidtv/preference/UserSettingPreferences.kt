@@ -27,6 +27,13 @@ class UserSettingPreferences(
 		val randomType = stringPreference("extras.randomType", "")
 		val randomUnwatched = stringPreference("extras.randomUnwatched", "")
 
+		// Collections and genres with a row of their own (see PinnedRow), and the rows that show thumbnails
+		val pinnedRows = stringPreference("toridame.pinnedRows", "[]")
+		val thumbRows = stringPreference("toridame.thumbRows", "")
+
+		// Libraries and collections pinned to the side menu (see PinnedRow)
+		val sidePins = stringPreference("toridame.sidePins", "[]")
+
 		val homesection0 = enumPreference("homesection0", HomeSectionType.LIBRARY_TILES_SMALL)
 		val homesection1 = enumPreference("homesection1", HomeSectionType.RESUME)
 		val homesection2 = enumPreference("homesection2", HomeSectionType.RESUME_AUDIO)

@@ -77,6 +77,7 @@ import org.jellyfin.androidtv.ui.playback.nextup.NextUpFragment
 import org.jellyfin.androidtv.ui.playback.stillwatching.StillWatchingFragment
 import org.jellyfin.androidtv.ui.search.SearchFragment
 import org.jellyfin.androidtv.ui.settings.compat.SettingsViewModel
+import org.jellyfin.androidtv.data.repository.rememberFeature
 import org.jellyfin.androidtv.ui.shared.toolbar.AccountSwitcherDialog
 import org.jellyfin.androidtv.ui.shared.toolbar.CatchUpDialog
 import org.jellyfin.androidtv.ui.shared.toolbar.rememberRandomTitle
@@ -87,6 +88,19 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinActivityViewModel
 import kotlin.reflect.KClass
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.preference.PinnedRow
+import org.jellyfin.androidtv.preference.UserSettingPreferences
+import org.jellyfin.androidtv.preference.toPinnedRows
+import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
+import org.jellyfin.sdk.api.client.extensions.userLibraryApi
+import java.util.UUID
 
 /** The width of the menu while it is folded away; the screens next to it are laid out beside this. */
 val SideMenuCollapsedWidth = 72.dp
@@ -95,6 +109,12 @@ val SideMenuCollapsedWidth = 72.dp
 private val MinExpandedWidth = 180.dp
 private val MaxExpandedWidth = 420.dp
 private val ItemHeight = SideMenuCollapsedWidth - 16.dp
+// With many pinned items the buttons shrink, down to this, and then the pinned ones scroll
+private val MinItemHeight = 36.dp
+private val ItemSpacing = 6.dp
+// The menu's own padding, top and bottom, and room kept for the gaps between its groups
+private val MenuPadding = 24.dp
+private val GroupGaps = 32.dp
 
 /** The screens that use the whole display, where the menu would only be in the way. */
 private val screensWithoutMenu: Set<KClass<out androidx.fragment.app.Fragment>> = setOf(
@@ -141,9 +161,27 @@ fun SideMenu(
 	val playing by rememberQueueEntry(playbackManager)
 
 	val randomTitle = rememberRandomTitle()
+	val accountSwitcherOn = rememberFeature("accountSwitcher")
+	val catchUpOn = rememberFeature("catchUp")
 	var showAccountSwitcher by remember { mutableStateOf(false) }
 	var showCatchUp by remember { mutableStateOf(false) }
 	var expanded by remember { mutableStateOf(false) }
+
+	// What was pinned in the settings; read again whenever the settings close
+	val userSettingPreferences = koinInject<UserSettingPreferences>()
+	val itemLauncher = koinInject<ItemLauncher>()
+	val scope = rememberCoroutineScope()
+	val settingsVisible by settingsViewModel.visible.collectAsState()
+	val pins = remember(settingsVisible) { userSettingPreferences[UserSettingPreferences.sidePins].toPinnedRows() }
+	val openPin: (PinnedRow) -> Unit = { pin ->
+		scope.launch {
+			val item = runCatching {
+				withContext(Dispatchers.IO) { api.userLibraryApi.getItem(itemId = UUID.fromString(pin.id)).content }
+			}.getOrNull() ?: return@launch
+			if (pin.kind == PinnedRow.COLLECTION) navigationRepository.navigate(Destinations.collectionBrowser(item))
+			else itemLauncher.launchUserView(item)
+		}
+	}
 
 	val onHome = destination.fragment == HomeFragment::class
 	val onSearch = destination.fragment == SearchFragment::class
@@ -196,13 +234,18 @@ fun SideMenu(
 	val labels by animateFloatAsState(if (expanded) 1f else 0f, tween(if (expanded) 220 else 90), label = "sideMenuLabels")
 
 	// Takes up only the folded width; the open menu is drawn over the screen instead of pushing it aside
-	Box(
+	BoxWithConstraints(
 		modifier = modifier
 			.width(SideMenuCollapsedWidth)
 			.fillMaxHeight()
 			// Open, it is drawn over the screen next to it, not under it
 			.zIndex(10f),
 	) {
+		// The buttons shrink as more of them are added, so that they all keep fitting
+		val itemCount = 4 + (if (randomTitle != null) 1 else 0) + (if (catchUpOn) 1 else 0) + (if (playing != null) 1 else 0) + pins.size
+		val available = maxHeight - MenuPadding * 2 - GroupGaps
+		val itemHeight = ((available - ItemSpacing * (itemCount - 1)) / itemCount).coerceIn(MinItemHeight, ItemHeight)
+
 		// See-through: only a soft shade of the theme's dark color behind the labels, fading out to the right
 		val shade = JellyfinTheme.colorScheme.background
 		Column(
@@ -242,26 +285,29 @@ fun SideMenu(
 		) {
 			// The account comes first, as the way to be somebody else
 			SideMenuItem(
+				itemHeight = itemHeight,
 				label = currentUser?.name.orEmpty(),
 				labelAlpha = labels,
 				active = false,
-				onClick = { showAccountSwitcher = true },
+				onClick = { if (accountSwitcherOn) showAccountSwitcher = true },
 				icon = {
 					ProfilePicture(
 						url = userImage,
 						name = currentUser?.name,
 						contentDescription = stringResource(R.string.lbl_switch_user),
 						modifier = Modifier
-							.size(36.dp)
+							.size((itemHeight * 0.64f).coerceIn(26.dp, 36.dp))
 							.clip(CircleShape)
 							.background(JellyfinTheme.colorScheme.badge),
 					)
 				},
 			)
 
-			Spacer(Modifier.weight(1f))
+			// With pinned items the space is theirs; without, the main items sit in the middle
+			if (pins.isEmpty()) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(16.dp))
 
 			SideMenuItem(
+				itemHeight = itemHeight,
 				label = stringResource(R.string.lbl_home),
 				icon = R.drawable.ic_house,
 				labelAlpha = labels,
@@ -270,6 +316,7 @@ fun SideMenu(
 				onClick = { if (!onHome) navigationRepository.navigate(Destinations.home, replace = true) },
 			)
 			SideMenuItem(
+				itemHeight = itemHeight,
 				label = stringResource(R.string.lbl_search),
 				icon = R.drawable.ic_search,
 				labelAlpha = labels,
@@ -279,6 +326,7 @@ fun SideMenu(
 			)
 			if (randomTitle != null) {
 				SideMenuItem(
+					itemHeight = itemHeight,
 					label = stringResource(R.string.random_title),
 					icon = R.drawable.ic_casino,
 					labelAlpha = labels,
@@ -286,15 +334,19 @@ fun SideMenu(
 					onClick = randomTitle,
 				)
 			}
-			SideMenuItem(
-				label = stringResource(R.string.catch_up_title),
-				icon = R.drawable.ic_catch_up,
-				labelAlpha = labels,
-				active = false,
-				onClick = { showCatchUp = true },
-			)
+			if (catchUpOn) {
+				SideMenuItem(
+					itemHeight = itemHeight,
+					label = stringResource(R.string.catch_up_title),
+					icon = R.drawable.ic_catch_up,
+					labelAlpha = labels,
+					active = false,
+					onClick = { showCatchUp = true },
+				)
+			}
 			if (playing != null) {
 				SideMenuItem(
+					itemHeight = itemHeight,
 					label = stringResource(R.string.lbl_now_playing),
 					icon = R.drawable.ic_music_album,
 					labelAlpha = labels,
@@ -303,9 +355,32 @@ fun SideMenu(
 				)
 			}
 
-			Spacer(Modifier.weight(1f))
+			// What was pinned in the settings; this part scrolls once even the smallest buttons do not fit
+			if (pins.isNotEmpty()) {
+				Column(
+					modifier = Modifier
+						.weight(1f)
+						.padding(top = 16.dp)
+						.verticalScroll(rememberScrollState()),
+					verticalArrangement = Arrangement.spacedBy(ItemSpacing),
+				) {
+					for (pin in pins) {
+						SideMenuItem(
+							itemHeight = itemHeight,
+							label = pin.name,
+							icon = pinIcon(pin),
+							labelAlpha = labels,
+							active = false,
+							onClick = { openPin(pin) },
+						)
+					}
+				}
+			} else {
+				Spacer(Modifier.weight(1f))
+			}
 
 			SideMenuItem(
+				itemHeight = itemHeight,
 				label = stringResource(R.string.lbl_settings),
 				icon = R.drawable.ic_settings,
 				labelAlpha = labels,
@@ -318,6 +393,7 @@ fun SideMenu(
 
 @Composable
 private fun SideMenuItem(
+	itemHeight: Dp,
 	label: String,
 	icon: Int,
 	labelAlpha: Float,
@@ -326,6 +402,7 @@ private fun SideMenuItem(
 	modifier: Modifier = Modifier,
 ) = SideMenuItem(
 	modifier = modifier,
+	itemHeight = itemHeight,
 	label = label,
 	labelAlpha = labelAlpha,
 	active = active,
@@ -342,6 +419,7 @@ private fun SideMenuItem(
 
 @Composable
 private fun SideMenuItem(
+	itemHeight: Dp,
 	label: String,
 	labelAlpha: Float,
 	active: Boolean,
@@ -366,9 +444,9 @@ private fun SideMenuItem(
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.height(ItemHeight)
+			.height(itemHeight)
 			// Fills the folded width exactly, which makes it a circle there, and a pill when it is open
-			.clip(RoundedCornerShape(ItemHeight / 2))
+			.clip(RoundedCornerShape(itemHeight / 2))
 			.background(container)
 			.onFocusChanged { focused = it.isFocused }
 			.clickable(onClick = onClick)
@@ -384,7 +462,7 @@ private fun SideMenuItem(
 		Text(
 			text = label,
 			color = content,
-			fontSize = 20.sp,
+			fontSize = if (itemHeight < SmallItemHeight) 16.sp else 20.sp,
 			fontWeight = if (active || focused) FontWeight.Bold else FontWeight.Normal,
 			maxLines = 1,
 			softWrap = false,
@@ -397,3 +475,17 @@ private fun SideMenuItem(
 }
 
 private val IconSlot: Dp = 40.dp
+private val SmallItemHeight = 46.dp
+
+/** The icon shrinks along with the button, but stays big enough to recognise. */
+private fun iconSize(itemHeight: Dp): Dp = (itemHeight * 0.46f).coerceIn(18.dp, 26.dp)
+
+/** The icon of a pinned library or collection, by the kind of library it is. */
+private fun pinIcon(pin: PinnedRow): Int = when {
+	pin.kind == PinnedRow.COLLECTION -> R.drawable.ic_grid
+	pin.type.equals("movies", true) || pin.type.equals("boxsets", true) -> R.drawable.ic_clapperboard
+	pin.type.equals("tvshows", true) || pin.type.equals("livetv", true) -> R.drawable.ic_tv
+	pin.type.equals("music", true) -> R.drawable.ic_music_album
+	pin.type.equals("photos", true) || pin.type.equals("homevideos", true) -> R.drawable.ic_photos
+	else -> R.drawable.ic_folder
+}

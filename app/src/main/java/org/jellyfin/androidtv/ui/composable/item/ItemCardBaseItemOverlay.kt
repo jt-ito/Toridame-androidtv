@@ -23,6 +23,7 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.constant.WatchProgressChip
 import org.jellyfin.androidtv.preference.constant.WatchedIndicatorBehavior
+import org.jellyfin.androidtv.data.repository.rememberFeature
 import org.jellyfin.androidtv.ui.base.Badge
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Seekbar
@@ -164,7 +165,8 @@ private fun WatchIndicator(
 @Composable
 private fun InfoBadges(item: BaseItemDto) {
 	val userPreferences = koinInject<UserPreferences>()
-	if (!userPreferences[UserPreferences.badgesEnabled]) return
+	val featureOn = rememberFeature("posterBadges")
+	if (!userPreferences[UserPreferences.badgesEnabled] || !featureOn) return
 
 	val ageRating = item.officialRating?.takeIf { userPreferences[UserPreferences.badgesAgeRating] && it.isNotBlank() }
 	val score = item.communityRating?.takeIf { userPreferences[UserPreferences.badgesScore] && it > 0f }
@@ -186,7 +188,8 @@ private fun QualityBadge(
 	modifier: Modifier = Modifier,
 ) {
 	val userPreferences = koinInject<UserPreferences>()
-	if (!userPreferences[UserPreferences.badgesEnabled] || !userPreferences[UserPreferences.badgesQuality]) return
+	val featureOn = rememberFeature("posterBadges")
+	if (!userPreferences[UserPreferences.badgesEnabled] || !userPreferences[UserPreferences.badgesQuality] || !featureOn) return
 	if (item.type != BaseItemKind.MOVIE && item.type != BaseItemKind.EPISODE && item.type != BaseItemKind.VIDEO) return
 
 	val video = item.mediaStreams?.firstOrNull { it.type == org.jellyfin.sdk.model.api.MediaStreamType.VIDEO }

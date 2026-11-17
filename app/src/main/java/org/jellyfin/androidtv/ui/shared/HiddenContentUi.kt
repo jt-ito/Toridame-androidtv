@@ -11,6 +11,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.data.repository.PinResult
+import org.jellyfin.androidtv.data.repository.ServerFeatures
 import org.jellyfin.androidtv.data.repository.ToridameRepository
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.UserSettingPreferences
@@ -80,7 +81,8 @@ object HiddenContentUi {
 	fun canHide(item: BaseItemDto): Boolean {
 		if (item.type !in HIDEABLE) return false
 		val settings = KoinJavaComponent.get<UserPreferences>(UserPreferences::class.java)
-		return settings[UserPreferences.hiddenContentButton]
+		return settings[UserPreferences.hiddenContentButton] &&
+			KoinJavaComponent.get<ServerFeatures>(ServerFeatures::class.java).isEnabled("hiddenContent")
 	}
 
 	/** Hides the item from lists (it can still be opened and played) and says so. */

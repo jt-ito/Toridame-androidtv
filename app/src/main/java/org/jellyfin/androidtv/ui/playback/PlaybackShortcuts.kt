@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.data.repository.BookmarkRepository
+import org.jellyfin.androidtv.data.repository.ServerFeatures
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.constant.ZoomMode
 import org.koin.java.KoinJavaComponent
@@ -23,6 +24,7 @@ private const val MILLISECONDS_PER_SECOND = 1000
 object PlaybackBookmarks {
 	@JvmStatic
 	fun addHere(controller: PlaybackController) {
+		if (!KoinJavaComponent.get<ServerFeatures>(ServerFeatures::class.java).isEnabled("bookmarks")) return
 		val fragment = controller.fragment ?: return
 		val item = controller.currentlyPlayingItem ?: return
 		val seconds = (controller.currentPosition / MILLISECONDS_PER_SECOND).toInt()

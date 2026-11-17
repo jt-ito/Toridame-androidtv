@@ -28,6 +28,7 @@ import org.jellyfin.androidtv.preference.UserPreferences;
 import org.jellyfin.androidtv.preference.constant.ClockBehavior;
 import org.jellyfin.androidtv.ui.playback.PlaybackController;
 import org.jellyfin.androidtv.ui.playback.PlaybackShortcuts;
+import org.jellyfin.androidtv.data.repository.ServerFeatures;
 import org.jellyfin.androidtv.ui.playback.overlay.action.BookmarkAction;
 import org.jellyfin.androidtv.ui.playback.overlay.action.EpisodeListAction;
 import org.jellyfin.sdk.model.api.BaseItemKind;
@@ -320,7 +321,9 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         if (!playerAdapter.isLiveTv()) {
             // Episodes list their season; movies and other videos list their folder, collections and versions
             side.add(episodeListAction);
-            menu.add(new Pair<>(context.getString(R.string.bookmarks), bookmarkAction));
+            if (KoinJavaComponent.<ServerFeatures>get(ServerFeatures.class).isEnabled("bookmarks")) {
+                menu.add(new Pair<>(context.getString(R.string.bookmarks), bookmarkAction));
+            }
             menu.add(new Pair<>(context.getString(R.string.lbl_playback_speed), playbackSpeedAction));
             menu.add(new Pair<>(context.getString(R.string.lbl_quality_profile), selectQualityAction));
         }
@@ -341,6 +344,10 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         androidx.fragment.app.Fragment fragment = playbackController.getFragment();
         org.jellyfin.sdk.model.api.BaseItemDto item = playbackController.getCurrentlyPlayingItem();
         if (fragment == null || item == null) return;
+        if (!KoinJavaComponent.<ServerFeatures>get(ServerFeatures.class).isEnabled("bookmarks")) {
+            bookmarkMarkers.clear();
+            return;
+        }
 
         bookmarkMarkers.setChapters(item);
         bookmarkMarkers.refresh(androidx.lifecycle.LifecycleOwnerKt.getLifecycleScope(fragment), item.getId());

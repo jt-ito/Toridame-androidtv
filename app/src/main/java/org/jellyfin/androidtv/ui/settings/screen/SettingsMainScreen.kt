@@ -9,6 +9,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.data.repository.rememberFeature
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.list.ListButton
@@ -23,6 +24,11 @@ import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 fun SettingsMainScreen() {
 	val router = LocalRouter.current
 
+	val activityOn = rememberFeature("activityFeed")
+	val badgesOn = rememberFeature("posterBadges")
+	val hiddenOn = rememberFeature("hiddenContent")
+	val privateOn = rememberFeature("privateLibraries")
+
 	SettingsColumn {
 		item {
 			ListSection(
@@ -34,7 +40,7 @@ fun SettingsMainScreen() {
 
 		group(R.string.settings_group_account)
 		entry(router, R.drawable.ic_users, R.string.pref_login, Routes.AUTHENTICATION)
-		entry(router, R.drawable.ic_watch, R.string.activity_title, Routes.ACTIVITY)
+		if (activityOn) entry(router, R.drawable.ic_watch, R.string.activity_title, Routes.ACTIVITY)
 
 		group(R.string.settings_group_app)
 		entry(router, R.drawable.ic_adjust, R.string.pref_customization, Routes.CUSTOMIZATION)
@@ -44,9 +50,9 @@ fun SettingsMainScreen() {
 		entry(router, R.drawable.ic_control_select, R.string.pref_shortcuts, Routes.PLAYBACK_SHORTCUTS)
 
 		group(R.string.settings_group_content)
-		entry(router, R.drawable.ic_star, R.string.pref_badges, Routes.CUSTOMIZATION_BADGES)
-		entry(router, R.drawable.ic_visibility_off, R.string.hidden_title, Routes.CUSTOMIZATION_HIDDEN)
-		entry(router, R.drawable.ic_folder, R.string.private_title, Routes.CUSTOMIZATION_PRIVATE)
+		if (badgesOn) entry(router, R.drawable.ic_star, R.string.pref_badges, Routes.CUSTOMIZATION_BADGES)
+		if (hiddenOn) entry(router, R.drawable.ic_visibility_off, R.string.hidden_title, Routes.CUSTOMIZATION_HIDDEN)
+		if (privateOn) entry(router, R.drawable.ic_folder, R.string.private_title, Routes.CUSTOMIZATION_PRIVATE)
 
 		group(R.string.settings_group_help)
 		entry(router, R.drawable.ic_error, R.string.pref_telemetry_category, Routes.TELEMETRY)

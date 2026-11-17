@@ -279,7 +279,7 @@ private fun BaseRowItem.getDisplayConfig(imageType: ImageType, uniformAspect: Bo
 
 @Composable
 @Stable
-private fun CardViewHolderContent(
+internal fun CardViewHolderContent(
 	item: BaseRowItem?,
 	focused: Boolean,
 	showInfo: Boolean,

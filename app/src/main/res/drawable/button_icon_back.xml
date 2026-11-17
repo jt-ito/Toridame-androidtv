@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android" android:enterFadeDuration="@integer/button_fade_duration" android:exitFadeDuration="@integer/button_fade_duration">
-    <item android:drawable="@color/transparent" android:state_focused="false" />
+    <!-- In focus: the light circle the side menu and the other buttons use, with a dark icon on it -->
     <item android:state_enabled="true" android:state_focused="true">
         <shape android:shape="oval">
-            <solid android:color="?attr/buttonDefaultHighlightBackground" />
+            <solid android:color="@color/button_default_highlight_background" />
         </shape>
     </item>
+    <!-- Switched on: a soft circle, with the icon in the accent color -->
+    <item android:state_activated="true">
+        <shape android:shape="oval">
+            <solid android:color="#33FFFFFF" />
+        </shape>
+    </item>
+    <item android:drawable="@color/transparent" />
 </selector>

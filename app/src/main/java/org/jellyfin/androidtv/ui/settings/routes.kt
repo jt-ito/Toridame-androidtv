@@ -25,7 +25,11 @@ import org.jellyfin.androidtv.ui.settings.screen.customization.subtitle.Settings
 import org.jellyfin.androidtv.ui.settings.screen.customization.subtitle.SettingsSubtitlesBackgroundColorScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.subtitle.SettingsSubtitlesScreen
 import org.jellyfin.androidtv.ui.settings.screen.customization.subtitle.SettingsSubtitlesTextColorScreen
+import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsSideMenuAddScreen
+import org.jellyfin.androidtv.ui.settings.screen.customization.SettingsSideMenuScreen
 import org.jellyfin.androidtv.ui.settings.screen.home.SettingsHomeNextUpCutoffScreen
+import org.jellyfin.androidtv.ui.settings.screen.home.SettingsHomePinnedAddScreen
+import org.jellyfin.androidtv.ui.settings.screen.home.SettingsHomePinnedScreen
 import org.jellyfin.androidtv.ui.settings.screen.home.SettingsHomeScreen
 import org.jellyfin.androidtv.ui.settings.screen.home.SettingsHomeSectionScreen
 import org.jellyfin.androidtv.ui.settings.screen.library.SettingsLibrariesDisplayGridScreen
@@ -96,8 +100,12 @@ object Routes {
 	const val LIBRARIES_DISPLAY_IMAGE_TYPE = "/libraries/display/{itemId}/{displayPreferencesId}/image-type"
 	const val LIBRARIES_DISPLAY_GRID = "/libraries/display/{itemId}/{displayPreferencesId}/grid"
 	const val HOME = "/home"
+	const val SIDE_MENU = "/side-menu"
+	const val SIDE_MENU_ADD = "/side-menu/add/{kind}"
 	const val HOME_SECTION = "/home/section/{index}"
 	const val HOME_NEXT_UP_CUTOFF = "/home/next-up-cutoff"
+	const val HOME_PINNED = "/home/pinned"
+	const val HOME_PINNED_ADD = "/home/pinned/add/{kind}"
 	const val LIVETV_GUIDE_FILTERS = "/livetv/guide/filters"
 	const val LIVETV_GUIDE_OPTIONS = "/livetv/guide/options"
 	const val LIVETV_GUIDE_CHANNEL_ORDER = "/livetv/guide/channel-order"
@@ -219,11 +227,23 @@ val routes = mapOf<String, RouteComposable>(
 	Routes.HOME to {
 		SettingsHomeScreen()
 	},
+	Routes.SIDE_MENU to {
+		SettingsSideMenuScreen()
+	},
+	Routes.SIDE_MENU_ADD to { context ->
+		SettingsSideMenuAddScreen(context.parameters["kind"].orEmpty())
+	},
 	Routes.HOME_SECTION to { context ->
 		SettingsHomeSectionScreen(context.parameters["index"]?.toInt()!!)
 	},
 	Routes.HOME_NEXT_UP_CUTOFF to {
 		SettingsHomeNextUpCutoffScreen()
+	},
+	Routes.HOME_PINNED to {
+		SettingsHomePinnedScreen()
+	},
+	Routes.HOME_PINNED_ADD to { context ->
+		SettingsHomePinnedAddScreen(context.parameters["kind"].orEmpty())
 	},
 	Routes.LIVETV_GUIDE_FILTERS to {
 		SettingsLiveTvGuideFiltersScreen()

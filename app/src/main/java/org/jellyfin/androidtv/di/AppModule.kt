@@ -18,6 +18,7 @@ import org.jellyfin.androidtv.auth.repository.UserRepositoryImpl
 import org.jellyfin.androidtv.data.eventhandling.SocketHandler
 import org.jellyfin.androidtv.data.model.DataRefreshService
 import org.jellyfin.androidtv.data.repository.BookmarkRepository
+import org.jellyfin.androidtv.data.repository.ServerFeatures
 import org.jellyfin.androidtv.data.repository.ToridameRepository
 import org.jellyfin.androidtv.data.repository.CustomMessageRepository
 import org.jellyfin.androidtv.data.repository.CustomMessageRepositoryImpl
@@ -146,6 +147,7 @@ val appModule = module {
 	single<UserRepository> { UserRepositoryImpl() }
 	single { BookmarkRepository(get()) }
 	single { ToridameRepository(get()) }
+	single { ServerFeatures(get()) }
 	single { org.jellyfin.androidtv.ui.shared.MaintenanceState(get()) }
 	single<UserViewsRepository> { UserViewsRepositoryImpl(get()) }
 	single<NotificationsRepository> { NotificationsRepositoryImpl(get(), get()) }

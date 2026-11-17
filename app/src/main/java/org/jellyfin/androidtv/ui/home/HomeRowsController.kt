@@ -1,28 +1,19 @@
 package org.jellyfin.androidtv.ui.home
 
-import org.jellyfin.sdk.model.api.SortOrder
-import org.jellyfin.sdk.model.api.ItemSortBy
-import org.jellyfin.sdk.model.api.CollectionType
-import org.jellyfin.sdk.model.api.BaseItemKind
-import org.jellyfin.sdk.model.api.BaseItemDto
-import org.jellyfin.sdk.api.client.extensions.itemsApi
-import android.os.Bundle
-import android.view.KeyEvent
-import android.view.View
-import androidx.leanback.app.RowsSupportFragment
+import androidx.fragment.app.FragmentActivity
 import androidx.leanback.widget.ListRow
-import androidx.leanback.widget.OnItemViewClickedListener
-import androidx.leanback.widget.OnItemViewSelectedListener
-import androidx.leanback.widget.Presenter
+import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.Row
-import androidx.leanback.widget.RowPresenter
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
@@ -34,6 +25,7 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.constant.CustomMessage
 import org.jellyfin.androidtv.constant.HomeSectionType
+import org.jellyfin.androidtv.constant.ImageType
 import org.jellyfin.androidtv.constant.LiveTvOption
 import org.jellyfin.androidtv.constant.QueryType
 import org.jellyfin.androidtv.data.model.DataRefreshService
@@ -43,31 +35,47 @@ import org.jellyfin.androidtv.data.repository.UserViewsRepository
 import org.jellyfin.androidtv.data.service.BackgroundService
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.UserSettingPreferences
+import org.jellyfin.androidtv.preference.toPinnedRows
+import org.jellyfin.androidtv.preference.toThumbKeys
 import org.jellyfin.androidtv.ui.GridButton
-import org.jellyfin.androidtv.ui.browsing.CompositeClickedListener
-import org.jellyfin.androidtv.ui.browsing.CompositeSelectedListener
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter
 import org.jellyfin.androidtv.ui.itemhandling.refreshItem
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
+import org.jellyfin.androidtv.data.model.AppNotification
 import org.jellyfin.androidtv.ui.playback.AudioEventListener
 import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.presentation.CardPresenter
 import org.jellyfin.androidtv.ui.presentation.MutableObjectAdapter
-import org.jellyfin.androidtv.ui.presentation.PositionableListRowPresenter
 import org.jellyfin.androidtv.util.KeyProcessor
 import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.sockets.subscribe
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.CollectionType
+import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.LibraryChangedMessage
+import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.UserDataChangedMessage
-import org.koin.android.ext.android.inject
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import timber.log.Timber
+import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
-class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyListener {
+/**
+ * Loads the rows of the home screen and reacts to what happens to them (focus, clicks, refreshes). It draws nothing:
+ * [HomeRows] shows what is in [rows]. The rows still come from the same adapters the other screens use, so every
+ * kind of row keeps working until those screens have been moved over too.
+ */
+class HomeRowsController(
+	private val activity: FragmentActivity,
+	private val owner: LifecycleOwner,
+) : KoinComponent, AudioEventListener {
 	private val api by inject<ApiClient>()
 	private val backgroundService by inject<BackgroundService>()
 	private val playbackManager by inject<PlaybackManager>()
@@ -83,99 +91,84 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 	private val itemLauncher by inject<ItemLauncher>()
 	private val keyProcessor by inject<KeyProcessor>()
 
-	private val helper by lazy { HomeFragmentHelper(requireContext(), userRepository, userPreferences) }
+	private val lifecycle get() = owner.lifecycle
+	private val scope get() = owner.lifecycleScope
+	private val helper by lazy { HomeFragmentHelper(activity, userRepository, userPreferences) }
 
-	// Data
+	/** The rows, in the order they are shown. */
+	val rows = MutableObjectAdapter<Row>(ListRowPresenter())
+
 	private var currentItem: BaseRowItem? = null
 	private var currentRow: ListRow? = null
 	private var justLoaded = true
 	private var serverEventRefresh: Job? = null
 
 	/** The title that has the focus, for the header above the rows. */
-	private val _focusedItem = kotlinx.coroutines.flow.MutableStateFlow<org.jellyfin.sdk.model.api.BaseItemDto?>(null)
-	val focusedItem: kotlinx.coroutines.flow.StateFlow<org.jellyfin.sdk.model.api.BaseItemDto?> = _focusedItem
+	private val _focusedItem = MutableStateFlow<BaseItemDto?>(null)
+	val focusedItem: StateFlow<BaseItemDto?> = _focusedItem
 
 	/** How many titles the focused library holds and what was added to it last, for the header and the backdrop. */
-	private val libraryPreviews = mutableMapOf<java.util.UUID, LibraryPreview>()
-	private val _libraryPreview = kotlinx.coroutines.flow.MutableStateFlow<LibraryPreview?>(null)
-	val libraryPreview: kotlinx.coroutines.flow.StateFlow<LibraryPreview?> = _libraryPreview
+	private val libraryPreviews = mutableMapOf<UUID, LibraryPreview>()
+	private val _libraryPreview = MutableStateFlow<LibraryPreview?>(null)
+	val libraryPreview: StateFlow<LibraryPreview?> = _libraryPreview
 	private var libraryPreviewJob: Job? = null
-	private var libraryPreviewFor: java.util.UUID? = null
-	private var focusedLibraryId: java.util.UUID? = null
+	private var libraryPreviewFor: UUID? = null
+	private var focusedLibraryId: UUID? = null
 
-	// Special rows
-	private val notificationsRow by lazy { NotificationsHomeFragmentRow(lifecycleScope, notificationsRepository) }
-	private val nowPlaying by lazy { HomeFragmentNowPlayingRow(lifecycleScope, playbackManager, mediaManager) }
+	private val notificationsRow by lazy { NotificationsHomeFragmentRow(scope, notificationsRepository) }
+	private val nowPlaying by lazy { HomeFragmentNowPlayingRow(scope, playbackManager, mediaManager) }
 
-	override fun onCreate(savedInstanceState: Bundle?) {
-		super.onCreate(savedInstanceState)
-
-		adapter = MutableObjectAdapter<Row>(PositionableListRowPresenter())
-
-		lifecycleScope.launch(Dispatchers.IO) {
+	fun start() {
+		scope.launch(Dispatchers.IO) {
 			val currentUser = withTimeout(30.seconds) {
 				userRepository.currentUser.filterNotNull().first()
 			}
 
-			// Start out with default sections
-			val homesections = userSettingPreferences.activeHomesections
-
-			// Make sure the rows are empty
-			val rows = mutableListOf<HomeFragmentRow>()
-
-			// Check for coroutine cancellation
+			// With the key the row has in the "thumbnails" setting
+			val rowDefinitions = mutableListOf<Pair<String, HomeFragmentRow>>()
 			if (!isActive) return@launch
 
-			// Actually add the sections
-			for (section in homesections) when (section) {
-				HomeSectionType.LATEST_MEDIA -> rows.add(helper.loadRecentlyAdded(userViewsRepository.views.first()))
-				HomeSectionType.LIBRARY_TILES_SMALL -> rows.add(HomeFragmentViewsRow(small = false))
-				HomeSectionType.LIBRARY_BUTTONS -> rows.add(HomeFragmentViewsRow(small = true))
-				HomeSectionType.RESUME -> rows.add(helper.loadResumeVideo())
-				HomeSectionType.RESUME_NEXT_UP -> rows.add(helper.loadResumeNextUp())
-				HomeSectionType.FAVORITES -> rows.add(helper.loadFavorites())
-				HomeSectionType.RESUME_AUDIO -> rows.add(helper.loadResumeAudio())
+			for (section in userSettingPreferences.activeHomesections) when (section) {
+				HomeSectionType.LATEST_MEDIA -> rowDefinitions.add(section.serializedName to helper.loadRecentlyAdded(userViewsRepository.views.first()))
+				HomeSectionType.LIBRARY_TILES_SMALL -> rowDefinitions.add(section.serializedName to HomeFragmentViewsRow(small = false))
+				HomeSectionType.LIBRARY_BUTTONS -> rowDefinitions.add(section.serializedName to HomeFragmentViewsRow(small = true))
+				HomeSectionType.RESUME -> rowDefinitions.add(section.serializedName to helper.loadResumeVideo())
+				HomeSectionType.RESUME_NEXT_UP -> rowDefinitions.add(section.serializedName to helper.loadResumeNextUp())
+				HomeSectionType.FAVORITES -> rowDefinitions.add(section.serializedName to helper.loadFavorites())
+				HomeSectionType.RESUME_AUDIO -> rowDefinitions.add(section.serializedName to helper.loadResumeAudio())
 				HomeSectionType.RESUME_BOOK -> Unit // Books are not (yet) supported
-				HomeSectionType.ACTIVE_RECORDINGS -> rows.add(helper.loadLatestLiveTvRecordings())
-				HomeSectionType.NEXT_UP -> rows.add(helper.loadNextUp())
+				HomeSectionType.ACTIVE_RECORDINGS -> rowDefinitions.add(section.serializedName to helper.loadLatestLiveTvRecordings())
+				HomeSectionType.NEXT_UP -> rowDefinitions.add(section.serializedName to helper.loadNextUp())
 				HomeSectionType.LIVE_TV -> if (currentUser.policy?.enableLiveTvAccess == true) {
-					rows.add(HomeFragmentLiveTVRow(requireActivity(), userRepository))
-					rows.add(helper.loadOnNow())
+					rowDefinitions.add(section.serializedName to HomeFragmentLiveTVRow(activity, userRepository))
+					rowDefinitions.add(section.serializedName to helper.loadOnNow())
 				}
 
 				HomeSectionType.NONE -> Unit
 			}
 
-			// Add sections to layout
+			for (pinned in userSettingPreferences[UserSettingPreferences.pinnedRows].toPinnedRows()) {
+				rowDefinitions.add(pinned.key to HomeFragmentPinnedRow(pinned))
+			}
+
 			withContext(Dispatchers.Main) {
 				val cardPresenter = CardPresenter()
+				val thumbPresenter = CardPresenter(true, ImageType.THUMB, THUMB_ROW_HEIGHT)
+				val thumbKeys = userSettingPreferences[UserSettingPreferences.thumbRows].toThumbKeys()
 
-				// Add rows in order
-				notificationsRow.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
-				nowPlaying.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
-				for (row in rows) row.addToRowsAdapter(requireContext(), cardPresenter, adapter as MutableObjectAdapter<Row>)
+				notificationsRow.addToRowsAdapter(activity, cardPresenter, rows)
+				nowPlaying.addToRowsAdapter(activity, cardPresenter, rows)
+				for ((key, row) in rowDefinitions) row.addToRowsAdapter(activity, if (key in thumbKeys) thumbPresenter else cardPresenter, rows)
 
 				// Wire up Live TV sibling rows so the On Now row removes the buttons row when empty
-				@Suppress("UNCHECKED_CAST")
-				val rowsAdapter = adapter as MutableObjectAdapter<Row>
-				for (i in 0 until rowsAdapter.size()) {
-					val listRow = rowsAdapter.get(i) as? ListRow ?: continue
+				for (i in 0 until rows.size()) {
+					val listRow = rows.get(i) as? ListRow ?: continue
 					val itemAdapter = listRow.adapter as? ItemRowAdapter ?: continue
 					if (itemAdapter.queryType == QueryType.LiveTvProgram && i > 0) {
-						val previousRow = rowsAdapter.get(i - 1)
-						if (previousRow != null) itemAdapter.setSiblingRow(previousRow)
+						rows.get(i - 1)?.let { itemAdapter.setSiblingRow(it) }
 					}
 				}
 			}
-		}
-
-		onItemViewClickedListener = CompositeClickedListener().apply {
-			registerListener(ItemViewClickedListener())
-			registerListener(notificationsRow::onItemClicked)
-		}
-
-		onItemViewSelectedListener = CompositeSelectedListener().apply {
-			registerListener(ItemViewSelectedListener())
 		}
 
 		customMessageRepository.message
@@ -185,9 +178,9 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 					CustomMessage.RefreshCurrentItem -> refreshCurrentItem()
 					else -> Unit
 				}
-			}.launchIn(lifecycleScope)
+			}.launchIn(scope)
 
-		lifecycleScope.launch {
+		scope.launch {
 			lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
 				api.webSocket.subscribe<UserDataChangedMessage>()
 					.onEach { refreshRowsAfterServerEvent() }
@@ -199,43 +192,86 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 			}
 		}
 
-		// Subscribe to Audio messages
 		mediaManager.addAudioEventListener(this)
 	}
 
-	override fun onKey(v: View?, keyCode: Int, event: KeyEvent?): Boolean {
-		if (event?.action != KeyEvent.ACTION_UP) return false
-		return keyProcessor.handleKey(keyCode, currentItem, activity)
-	}
-
-	override fun onResume() {
-		super.onResume()
-
-		//React to deletion
-		if (currentRow != null && currentItem != null && currentItem?.baseItem != null && currentItem!!.baseItem!!.id == dataRefreshService.lastDeletedItemId) {
-			(currentRow!!.adapter as ItemRowAdapter).remove(currentItem)
+	fun onResume() {
+		// React to deletion
+		val item = currentItem
+		val row = currentRow
+		if (row != null && item?.baseItem != null && item.baseItem?.id == dataRefreshService.lastDeletedItemId) {
+			(row.adapter as ItemRowAdapter).remove(item)
 			currentItem = null
 			dataRefreshService.lastDeletedItemId = null
 		}
 
 		if (!justLoaded) {
-			//Re-retrieve anything that needs it but delay slightly so we don't take away gui landing
+			// Re-retrieve anything that needs it, but not at once so the screen can settle first
 			refreshCurrentItem()
 			refreshRows()
 		} else {
 			justLoaded = false
 		}
 
-		// Update audio queue
-		Timber.i("Updating audio queue in HomeFragment (onResume)")
-		nowPlaying.update(requireContext(), adapter as MutableObjectAdapter<Row>)
+		nowPlaying.update(activity, rows)
+	}
+
+	fun onDestroy() {
+		mediaManager.removeAudioEventListener(this)
 	}
 
 	override fun onQueueStatusChanged(hasQueue: Boolean) {
-		if (activity == null || requireActivity().isFinishing) return
+		if (activity.isFinishing) return
+		nowPlaying.update(activity, rows)
+	}
 
-		Timber.i("Updating audio queue in HomeFragment (onQueueStatusChanged)")
-		nowPlaying.update(requireContext(), adapter as MutableObjectAdapter<Row>)
+	/** The menu key (or a long press on a card) opens the context menu of the focused title. */
+	fun onMenuKey(): Boolean = keyProcessor.handleKey(android.view.KeyEvent.KEYCODE_MENU, currentItem, activity)
+
+	fun onItemClicked(item: Any?, row: ListRow) {
+		when (item) {
+			is GridButton -> when (item.id) {
+				LiveTvOption.LIVE_TV_GUIDE_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvGuide)
+				LiveTvOption.LIVE_TV_SCHEDULE_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvSchedule)
+				LiveTvOption.LIVE_TV_RECORDINGS_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvRecordings)
+				LiveTvOption.LIVE_TV_SERIES_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvSeriesRecordings)
+			}
+
+			is AppNotification -> notificationsRow.onItemClicked(null, item, null, null)
+
+			is BaseRowItem -> {
+				@Suppress("UNCHECKED_CAST")
+				itemLauncher.launch(item, row.adapter as MutableObjectAdapter<Any>, activity)
+			}
+		}
+	}
+
+	fun onItemFocused(item: Any?, row: ListRow) {
+		_focusedItem.value = (item as? BaseRowItem)?.baseItem
+
+		if (item !is BaseRowItem) {
+			currentItem = null
+			backgroundService.clearBackgrounds()
+			return
+		}
+
+		currentItem = item
+		currentRow = row
+
+		val itemRowAdapter = row.adapter as? ItemRowAdapter
+		itemRowAdapter?.loadMoreItemsIfNeeded(itemRowAdapter.indexOf(item))
+
+		backgroundService.setBackground(item.baseItem)
+
+		// A library has no backdrop of its own: borrow the one of what was added to it last
+		val focused = item.baseItem
+		if (focused?.type == BaseItemKind.USER_VIEW || focused?.type == BaseItemKind.COLLECTION_FOLDER) {
+			focusedLibraryId = focused.id
+			showLibraryPreview(focused)
+		} else {
+			focusedLibraryId = null
+			_libraryPreview.value = null
+		}
 	}
 
 	/**
@@ -244,18 +280,18 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 	 */
 	private fun refreshRowsAfterServerEvent() {
 		serverEventRefresh?.cancel()
-		serverEventRefresh = lifecycleScope.launch {
+		serverEventRefresh = scope.launch {
 			delay(SERVER_EVENT_QUIET_PERIOD)
 			refreshRows(force = true, delayed = false)
 		}
 	}
 
 	private fun refreshRows(force: Boolean = false, delayed: Boolean = true) {
-		lifecycleScope.launch(Dispatchers.IO) {
+		scope.launch(Dispatchers.IO) {
 			if (delayed) delay(1.5.seconds)
 
-			repeat(adapter.size()) { i ->
-				val rowAdapter = (adapter[i] as? ListRow)?.adapter as? ItemRowAdapter
+			repeat(rows.size()) { i ->
+				val rowAdapter = (rows[i] as? ListRow)?.adapter as? ItemRowAdapter
 				if (force) rowAdapter?.Retrieve()
 				else rowAdapter?.ReRetrieveIfNeeded()
 			}
@@ -266,72 +302,8 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 		val adapter = currentRow?.adapter as? ItemRowAdapter ?: return
 		val item = currentItem ?: return
 
-		Timber.i("Refresh item ${item.getFullName(requireContext())}")
-		adapter.refreshItem(api, this, item)
-	}
-
-	override fun onDestroy() {
-		super.onDestroy()
-
-		mediaManager.removeAudioEventListener(this)
-	}
-
-	private inner class ItemViewClickedListener : OnItemViewClickedListener {
-		override fun onItemClicked(
-			itemViewHolder: Presenter.ViewHolder?,
-			item: Any?,
-			rowViewHolder: RowPresenter.ViewHolder?,
-			row: Row?,
-		) {
-			if (item is GridButton) {
-				when (item.id) {
-					LiveTvOption.LIVE_TV_GUIDE_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvGuide)
-					LiveTvOption.LIVE_TV_SCHEDULE_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvSchedule)
-					LiveTvOption.LIVE_TV_RECORDINGS_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvRecordings)
-					LiveTvOption.LIVE_TV_SERIES_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvSeriesRecordings)
-				}
-			}
-
-			if (item !is BaseRowItem) return
-			if (row !is ListRow) return
-			@Suppress("UNCHECKED_CAST")
-			itemLauncher.launch(item, row.adapter as MutableObjectAdapter<Any>, requireContext())
-		}
-	}
-
-	private inner class ItemViewSelectedListener : OnItemViewSelectedListener {
-		override fun onItemSelected(
-			itemViewHolder: Presenter.ViewHolder?,
-			item: Any?,
-			rowViewHolder: RowPresenter.ViewHolder?,
-			row: Row?,
-		) {
-			_focusedItem.value = (item as? BaseRowItem)?.baseItem
-
-			if (item !is BaseRowItem) {
-				currentItem = null
-				//fill in default background
-				backgroundService.clearBackgrounds()
-			} else {
-				currentItem = item
-				currentRow = row as ListRow
-
-				val itemRowAdapter = row.adapter as? ItemRowAdapter
-				itemRowAdapter?.loadMoreItemsIfNeeded(itemRowAdapter.indexOf(item))
-
-				backgroundService.setBackground(item.baseItem)
-
-				// A library has no backdrop of its own: borrow the one of what was added to it last
-				val focused = item.baseItem
-				if (focused?.type == BaseItemKind.USER_VIEW || focused?.type == BaseItemKind.COLLECTION_FOLDER) {
-					focusedLibraryId = focused.id
-					showLibraryPreview(focused)
-				} else {
-					focusedLibraryId = null
-					_libraryPreview.value = null
-				}
-			}
-		}
+		Timber.i("Refresh item ${item.getFullName(activity)}")
+		adapter.refreshItem(api, owner, item)
 	}
 
 	private fun showLibraryPreview(library: BaseItemDto) {
@@ -348,7 +320,7 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 		libraryPreviewJob?.cancel()
 		libraryPreviewFor = library.id
 		_libraryPreview.value = null
-		libraryPreviewJob = lifecycleScope.launch {
+		libraryPreviewJob = scope.launch {
 			try {
 				val result = runCatching {
 					withContext(Dispatchers.IO) {
@@ -391,12 +363,13 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 	private companion object {
 		val SERVER_EVENT_QUIET_PERIOD = 3.seconds
 		const val LIBRARY_PREVIEW_ITEMS = 3
+		const val THUMB_ROW_HEIGHT = 130
 	}
 }
 
 /** A library: how many titles it holds, and the ones added to it last. */
 data class LibraryPreview(
-	val libraryId: java.util.UUID,
+	val libraryId: UUID,
 	val count: Int,
 	val latest: List<BaseItemDto>,
 )

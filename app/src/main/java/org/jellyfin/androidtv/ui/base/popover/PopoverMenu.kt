@@ -45,7 +45,7 @@ fun PopoverMenu(
 fun PopoverMenuItem(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
-	shape: Shape = RoundedCornerShape(3.dp),
+	shape: Shape = RoundedCornerShape(12.dp),
 	content: @Composable RowScope.() -> Unit,
 ) = Button(
 	onClick = onClick,

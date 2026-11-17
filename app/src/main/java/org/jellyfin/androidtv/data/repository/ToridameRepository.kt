@@ -54,7 +54,7 @@ data class HiddenEntry(val itemId: UUID, val name: String, val type: String, val
 data class HiddenInfo(val count: Int, val limit: Int, val hasPin: Boolean)
 data class PrivateStatus(val active: Boolean, val unlocked: Boolean)
 data class PrivateLibrary(val id: UUID, val name: String)
-data class ServerCustomization(val pauseScreenEnabled: Boolean)
+data class ServerCustomization(val pauseScreenEnabled: Boolean, val features: Map<String, Boolean> = emptyMap())
 
 /** What the server says about maintenance. Times are in epoch milliseconds. */
 data class MaintenanceStatus(
@@ -129,7 +129,8 @@ class ToridameRepository(
 
 	suspend fun customization(): ServerCustomization = runCatching {
 		val json = JSONObject(getJson("Customization") ?: return ServerCustomization(false))
-		ServerCustomization(pauseScreenEnabled = json.optBoolean("PauseScreenEnabled"))
+		val features = json.optJSONObject("Features")?.let { list -> list.keys().asSequence().associateWith { list.optBoolean(it, true) } }.orEmpty()
+		ServerCustomization(pauseScreenEnabled = json.optBoolean("PauseScreenEnabled"), features = features)
 	}.getOrDefault(ServerCustomization(false))
 
 	// ---- Maintenance

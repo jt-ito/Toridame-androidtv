@@ -12,13 +12,14 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
-import android.widget.PopupMenu;
+import android.widget.RelativeLayout;
 import android.widget.PopupWindow;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
+import androidx.compose.ui.platform.ComposeView;
 import androidx.leanback.widget.BaseGridView;
 import androidx.leanback.widget.FocusHighlight;
 import androidx.leanback.widget.OnItemViewClickedListener;
@@ -66,12 +67,15 @@ import org.jellyfin.sdk.model.api.ItemSortBy;
 import org.jellyfin.sdk.model.api.SortOrder;
 
 import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 import kotlin.Lazy;
+import kotlin.Unit;
 import kotlinx.coroutines.flow.MutableStateFlow;
 import kotlinx.serialization.json.Json;
 import timber.log.Timber;
@@ -237,10 +241,37 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
         mGridView.setHorizontalSpacing(mGridItemSpacingHorizontal);
         mGridView.setVerticalSpacing(mGridItemSpacingVertical);
         mGridView.setFocusable(true);
+        // Up from the first row goes to the buttons above the grid (sort, filters, settings), which the focus search
+        // of the grid does not reach by itself
+        mGridView.setOnKeyInterceptListener(event -> {
+            if (event.getKeyCode() != KeyEvent.KEYCODE_DPAD_UP || !isOnTopRow()) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN) focusToolbar();
+            return true;
+        });
         binding.rowsFragment.removeAllViews();
         binding.rowsFragment.addView(mGridViewHolder.view);
 
         updateAdapter();
+    }
+
+    private boolean isOnTopRow() {
+        int position = mGridView.getSelectedPosition();
+        if (mGridPresenter instanceof VerticalGridPresenter) {
+            return position < Math.max(1, ((VerticalGridPresenter) mGridPresenter).getNumberOfColumns());
+        }
+        if (mGridPresenter instanceof HorizontalGridPresenter) {
+            int rows = ((HorizontalGridPresenter) mGridPresenter).getNumberOfRows();
+            return rows <= 1 || position % rows == 0;
+        }
+        return false;
+    }
+
+    private void focusToolbar() {
+        if (binding == null) return;
+        for (int i = 0; i < binding.toolBar.getChildCount(); i++) {
+            View button = binding.toolBar.getChildAt(i);
+            if (button.getVisibility() == View.VISIBLE && button.requestFocus()) return;
+        }
     }
 
     private void updateAdapter() {
@@ -688,7 +719,8 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
                     }, 500);
                 } else if (mGridView != null) {
                     mGridView.setFocusable(true);
-                    mGridView.requestFocus();
+                    // A filter that was just switched has the focus on its button: it stays there
+                    if (binding == null || !binding.toolBar.hasFocus()) mGridView.requestFocus();
                 }
             }
         });
@@ -709,6 +741,7 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
     }
 
     private ImageButton mSortButton;
+    private final SortMenuState mSortMenuState = new SortMenuState();
     private ImageButton mSettingsButton;
     private ImageButton mUnwatchedButton;
     private ImageButton mFavoriteButton;
@@ -732,43 +765,47 @@ public class BrowseGridFragment extends Fragment implements View.OnKeyListener {
         mSortButton.setImageResource(R.drawable.ic_sort);
         mSortButton.setMaxHeight(size);
         mSortButton.setAdjustViewBounds(true);
+        ComposeView sortMenuView = new ComposeView(requireContext());
+        RelativeLayout.LayoutParams sortMenuParams = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sortMenuParams.addRule(RelativeLayout.BELOW, R.id.toolBar);
+        sortMenuParams.addRule(RelativeLayout.ALIGN_PARENT_END);
+        sortMenuParams.setMarginEnd((int) (40 * getResources().getDisplayMetrics().density));
+        binding.getRoot().addView(sortMenuView, sortMenuParams);
+        BrowseGridFragmentHelperKt.addSortMenu(this, sortMenuView, mSortMenuState, id -> {
+            if (id == SORT_REVERSE_ID) {
+                SortOption now = getSortOption(mAdapter.getSortBy());
+                SortOrder flipped = SortOrder.DESCENDING.equals(mAdapter.getSortOrder()) ? SortOrder.ASCENDING : SortOrder.DESCENDING;
+                mAdapter.setSortBy(new SortOption(now.name, now.value, flipped));
+                mAdapter.Retrieve();
+                updateDisplayPrefs();
+                setStatusText(mFolder.getName());
+            } else {
+                mAdapter.setSortBy(Objects.requireNonNull(sortOptions.get(id)));
+                mAdapter.Retrieve();
+                updateDisplayPrefs();
+            }
+            return Unit.INSTANCE;
+        }, () -> {
+            // Left out of the menu goes on to the titles, once the menu has let go of the focus
+            if (mGridView != null) mGridView.post(() -> {
+                if (mGridView != null) mGridView.requestFocus();
+            });
+            return Unit.INSTANCE;
+        });
         mSortButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                //Create sort menu
-                PopupMenu sortMenu = new PopupMenu(getActivity(), binding.toolBar, Gravity.END);
+                // Open the sort menu
+                List<SortMenuItem> lines = new ArrayList<>();
                 for (Map.Entry<Integer, SortOption> entry : sortOptions.entrySet()) {
-                    MenuItem item = sortMenu.getMenu().add(0, entry.getKey(), entry.getKey(), entry.getValue().name);
-                    item.setChecked(entry.getValue().value.equals(libraryPreferences.get(LibraryPreferences.Companion.getSortBy())));
+                    lines.add(new SortMenuItem(entry.getKey(), entry.getValue().name, entry.getValue().value.equals(libraryPreferences.get(LibraryPreferences.Companion.getSortBy()))));
                 }
-                sortMenu.getMenu().setGroupCheckable(0, true, true);
 
                 // Flips the direction of the sort that is chosen: Z to A, oldest first, lowest rating first...
                 SortOption current = getSortOption(mAdapter.getSortBy());
-                MenuItem reverse = sortMenu.getMenu().add(1, SORT_REVERSE_ID, SORT_REVERSE_ID, getString(R.string.lbl_reverse_order));
-                reverse.setCheckable(true);
-                reverse.setChecked(!current.order.equals(mAdapter.getSortOrder()));
-                sortMenu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
-                    @Override
-                    public boolean onMenuItemClick(MenuItem item) {
-                        if (item.getItemId() == SORT_REVERSE_ID) {
-                            SortOption now = getSortOption(mAdapter.getSortBy());
-                            SortOrder flipped = SortOrder.DESCENDING.equals(mAdapter.getSortOrder()) ? SortOrder.ASCENDING : SortOrder.DESCENDING;
-                            mAdapter.setSortBy(new SortOption(now.name, now.value, flipped));
-                            mAdapter.Retrieve();
-                            updateDisplayPrefs();
-                            setStatusText(mFolder.getName());
-                            return true;
-                        }
-
-                        mAdapter.setSortBy(Objects.requireNonNull(sortOptions.get(item.getItemId())));
-                        mAdapter.Retrieve();
-                        item.setChecked(true);
-                        updateDisplayPrefs();
-                        return true;
-                    }
-                });
-                sortMenu.show();
+                lines.add(new SortMenuItem(SORT_REVERSE_ID, getString(R.string.lbl_reverse_order), !current.order.equals(mAdapter.getSortOrder())));
+                mSortMenuState.getItems().setValue(lines);
+                mSortMenuState.getVisible().setValue(true);
             }
         });
         mSortButton.setContentDescription(getString(R.string.lbl_sort_by));

@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.ui.settings.screen.home
 
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +40,26 @@ fun SettingsHomeScreen() {
 				onClick = { router.push(Routes.HOME_SECTION, mapOf("index" to index.toString())) },
 				modifier = Modifier.focusKey("home_section_$index")
 			)
+		}
+
+		item {
+			ListButton(
+				headingContent = { Text(stringResource(R.string.home_pinned_title)) },
+				captionContent = { Text(stringResource(R.string.home_pinned_caption)) },
+				onClick = { router.push(Routes.HOME_PINNED) },
+				modifier = Modifier.focusKey(Routes.HOME_PINNED)
+			)
+		}
+
+		item {
+			ListSection(
+				headingContent = { Text(stringResource(R.string.home_thumbnails_title)) },
+				captionContent = { Text(stringResource(R.string.home_thumbnails_caption)) },
+			)
+		}
+
+		items(thumbnailRowOptions) { (key, nameRes) ->
+			ThumbnailSwitch(key, stringResource(nameRes))
 		}
 
 		item {

@@ -227,5 +227,15 @@ fun SettingsCustomizationScreen() {
 				modifier = Modifier.focusKey(Routes.HOME)
 			)
 		}
+
+		item {
+			ListButton(
+				leadingContent = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null) },
+				headingContent = { Text(stringResource(R.string.side_menu_title)) },
+				captionContent = { Text(stringResource(R.string.side_menu_caption)) },
+				onClick = { router.push(Routes.SIDE_MENU) },
+				modifier = Modifier.focusKey(Routes.SIDE_MENU)
+			)
+		}
 	}
 }

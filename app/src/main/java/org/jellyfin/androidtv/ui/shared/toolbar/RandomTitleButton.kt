@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.data.repository.rememberFeature
 import org.jellyfin.androidtv.preference.UserSettingPreferences
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
@@ -34,7 +35,8 @@ fun rememberRandomTitle(): (() -> Unit)? {
 	val scope = rememberCoroutineScope()
 	var busy by remember { mutableStateOf(false) }
 
-	if (settings[UserSettingPreferences.randomButton] == "false") return null
+	val featureOn = rememberFeature("randomButton")
+	if (settings[UserSettingPreferences.randomButton] == "false" || !featureOn) return null
 
 	return {
 		if (!busy) {
